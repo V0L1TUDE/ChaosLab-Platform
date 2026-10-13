@@ -1,0 +1,159 @@
+{
+  "experiment": "payment-service-pod-kill",
+  "config": {
+    "name": "payment-service-pod-kill",
+    "target": {
+      "namespace": "default",
+      "label": {
+        "app": "paymentservice"
+      }
+    },
+    "fault": {
+      "type": "pod-kill",
+      "mode": "one"
+    },
+    "recovery": {
+      "timeout_seconds": 60
+    },
+    "verification": {
+      "expected_ready_replicas": 1
+    }
+  },
+  "target": "paymentservice",
+  "namespace": "default",
+  "fault": "pod-kill",
+  "baseline": {
+    "pod_name": "paymentservice-5df7f57d78-8fhwh",
+    "ready": "1/1",
+    "status": "Running",
+    "ip": "10.244.0.27",
+    "node": "desktop-control-plane"
+  },
+  "timestamps": {
+    "experiment_start": "2026-09-15T15:35:32.216549+00:00",
+    "fault_injected": "2026-09-15T15:35:34.088048+00:00",
+    "original_pod_disappeared": "2026-09-15T15:35:34.388644+00:00",
+    "replacement_ready": "2026-09-15T15:35:48.580129+00:00",
+    "experiment_end": "2026-09-15T15:35:50.805586+00:00"
+  },
+  "original_pod": "paymentservice-5df7f57d78-8fhwh",
+  "fault_injected": true,
+  "original_pod_disappeared": true,
+  "replacement_pod": "paymentservice-5df7f57d78-zzj98",
+  "replacement_ready": true,
+  "recovery_time_seconds": 14.19,
+  "total_recovery_seconds": 14.49,
+  "chaos_mesh_evidence": {
+    "available": true,
+    "resource_name": "chaoslab-payment-service-pod-kill",
+    "desired_phase": "Run",
+    "conditions": [
+      {
+        "type": "Selected",
+        "status": "True"
+      },
+      {
+        "type": "AllInjected",
+        "status": "True"
+      },
+      {
+        "type": "AllRecovered",
+        "status": "False"
+      },
+      {
+        "type": "Paused",
+        "status": "False"
+      }
+    ],
+    "container_records": [
+      {
+        "events": [
+          {
+            "operation": "Apply",
+            "timestamp": "2026-09-15T15:35:34Z",
+            "type": "Succeeded"
+          }
+        ],
+        "id": "default/paymentservice-5df7f57d78-8fhwh",
+        "injectedCount": 1,
+        "phase": "Injected",
+        "recoveredCount": 0,
+        "selectorKey": "."
+      }
+    ]
+  },
+  "kubernetes_events": [
+    {
+      "reason": "Pulled",
+      "message": "Container image \"us-central1-docker.pkg.dev/online-boutique-ci/microservices-demo/paymentservice:v0.10.6\" already present on machine and can be accessed by the pod",
+      "object": "pod/paymentservice-5df7f57d78-8fhwh",
+      "type": "Normal",
+      "timestamp": "2026-09-15T14:54:53Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/paymentservice-5df7f57d78-8fhwh",
+      "type": "Normal",
+      "timestamp": "2026-09-15T14:54:54Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: timeout: failed to connect service \"10.244.0.27:50051\" within 1s: context deadline exceeded",
+      "object": "pod/paymentservice-5df7f57d78-8fhwh",
+      "type": "Warning",
+      "timestamp": "2026-09-15T14:54:56Z"
+    },
+    {
+      "reason": "Killing",
+      "message": "Stopping container server",
+      "object": "pod/paymentservice-5df7f57d78-8fhwh",
+      "type": "Normal",
+      "timestamp": "2026-09-15T15:35:34Z"
+    },
+    {
+      "reason": "Scheduled",
+      "message": "Successfully assigned default/paymentservice-5df7f57d78-zzj98 to desktop-control-plane",
+      "object": "pod/paymentservice-5df7f57d78-zzj98",
+      "type": "Normal",
+      "timestamp": "2026-09-15T15:35:34.250567Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: paymentservice-5df7f57d78-zzj98",
+      "object": "replicaset/paymentservice-5df7f57d78",
+      "type": "Normal",
+      "timestamp": "2026-09-15T15:35:34Z"
+    },
+    {
+      "reason": "Pulled",
+      "message": "Container image \"us-central1-docker.pkg.dev/online-boutique-ci/microservices-demo/paymentservice:v0.10.6\" already present on machine and can be accessed by the pod",
+      "object": "pod/paymentservice-5df7f57d78-zzj98",
+      "type": "Normal",
+      "timestamp": "2026-09-15T15:35:36Z"
+    },
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/paymentservice-5df7f57d78-zzj98",
+      "type": "Normal",
+      "timestamp": "2026-09-15T15:35:36Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/paymentservice-5df7f57d78-zzj98",
+      "type": "Normal",
+      "timestamp": "2026-09-15T15:35:37Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: timeout: failed to connect service \"10.244.0.28:50051\" within 1s: context deadline exceeded",
+      "object": "pod/paymentservice-5df7f57d78-zzj98",
+      "type": "Warning",
+      "timestamp": "2026-09-15T15:35:39Z"
+    }
+  ],
+  "verdict": "PASS",
+  "failure_reason": null
+}

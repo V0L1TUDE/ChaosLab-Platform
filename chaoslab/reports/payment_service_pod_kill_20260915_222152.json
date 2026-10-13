@@ -1,0 +1,206 @@
+{
+  "experiment": "payment-service-pod-kill",
+  "target": "paymentservice",
+  "namespace": "default",
+  "fault": "pod-kill",
+  "baseline": {
+    "pod_name": "paymentservice-5df7f57d78-7z77p",
+    "ready": "1/1",
+    "status": "Running",
+    "ready_replicas": 1,
+    "ip": "10.244.0.31",
+    "node": "desktop-control-plane"
+  },
+  "timestamps": {
+    "experiment_start": "2026-09-15T16:51:36.434964+00:00",
+    "fault_injected": "2026-09-15T16:51:38.137579+00:00",
+    "original_pod_disappeared": "2026-09-15T16:51:38.291606+00:00",
+    "replacement_ready": "2026-09-15T16:51:50.583714+00:00",
+    "experiment_end": "2026-09-15T16:51:52.922236+00:00"
+  },
+  "original_pod": "paymentservice-5df7f57d78-7z77p",
+  "fault_injected": true,
+  "original_pod_disappeared": true,
+  "replacement_pod": "paymentservice-5df7f57d78-72krd",
+  "replacement_ready": true,
+  "recovered_ready_replicas": 1,
+  "recovery_time_seconds": 12.29,
+  "total_recovery_seconds": 12.45,
+  "chaos_mesh_evidence": {
+    "available": true,
+    "resource_name": "chaoslab-payment-service-pod-kill",
+    "desired_phase": "Run",
+    "conditions": [
+      {
+        "type": "Selected",
+        "status": "True"
+      },
+      {
+        "type": "AllInjected",
+        "status": "True"
+      },
+      {
+        "type": "AllRecovered",
+        "status": "False"
+      },
+      {
+        "type": "Paused",
+        "status": "False"
+      }
+    ],
+    "container_records": [
+      {
+        "events": [
+          {
+            "operation": "Apply",
+            "timestamp": "2026-09-15T16:51:38Z",
+            "type": "Succeeded"
+          }
+        ],
+        "id": "default/paymentservice-5df7f57d78-7z77p",
+        "injectedCount": 1,
+        "phase": "Injected",
+        "recoveredCount": 0,
+        "selectorKey": "."
+      }
+    ]
+  },
+  "kubernetes_events": [
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/paymentservice-5df7f57d78-7z77p",
+      "type": "Normal",
+      "timestamp": "2026-09-15T16:47:14Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/paymentservice-5df7f57d78-7z77p",
+      "type": "Normal",
+      "timestamp": "2026-09-15T16:47:14Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: timeout: failed to connect service \"10.244.0.31:50051\" within 1s: context deadline exceeded",
+      "object": "pod/paymentservice-5df7f57d78-7z77p",
+      "type": "Warning",
+      "timestamp": "2026-09-15T16:47:16Z"
+    },
+    {
+      "reason": "Killing",
+      "message": "Stopping container server",
+      "object": "pod/paymentservice-5df7f57d78-7z77p",
+      "type": "Normal",
+      "timestamp": "2026-09-15T16:51:38Z"
+    },
+    {
+      "reason": "Scheduled",
+      "message": "Successfully assigned default/paymentservice-5df7f57d78-72krd to desktop-control-plane",
+      "object": "pod/paymentservice-5df7f57d78-72krd",
+      "type": "Normal",
+      "timestamp": "2026-09-15T16:51:38.221453Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: paymentservice-5df7f57d78-72krd",
+      "object": "replicaset/paymentservice-5df7f57d78",
+      "type": "Normal",
+      "timestamp": "2026-09-15T16:51:38Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/paymentservice-5df7f57d78-72krd",
+      "type": "Normal",
+      "timestamp": "2026-09-15T16:51:39Z"
+    },
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/paymentservice-5df7f57d78-72krd",
+      "type": "Normal",
+      "timestamp": "2026-09-15T16:51:39Z"
+    },
+    {
+      "reason": "Pulled",
+      "message": "Container image \"us-central1-docker.pkg.dev/online-boutique-ci/microservices-demo/paymentservice:v0.10.6\" already present on machine and can be accessed by the pod",
+      "object": "pod/paymentservice-5df7f57d78-72krd",
+      "type": "Normal",
+      "timestamp": "2026-09-15T16:51:39Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: timeout: failed to connect service \"10.244.0.32:50051\" within 1s: context deadline exceeded",
+      "object": "pod/paymentservice-5df7f57d78-72krd",
+      "type": "Warning",
+      "timestamp": "2026-09-15T16:51:41Z"
+    }
+  ],
+  "config": {
+    "name": "payment-service-pod-kill",
+    "target": {
+      "namespace": "default",
+      "label": {
+        "app": "paymentservice"
+      }
+    },
+    "fault": {
+      "type": "pod-kill",
+      "mode": "one"
+    },
+    "recovery": {
+      "timeout_seconds": 60
+    },
+    "verification": {
+      "expected_ready_replicas": 1
+    }
+  },
+  "verdict": "PASS",
+  "failure_reason": null,
+  "oracle_evaluation": {
+    "verdict": "PASS",
+    "total_rules": 5,
+    "passed_rules": 5,
+    "failed_rules": 0,
+    "all_rules_passed": true,
+    "failure_reasons": [],
+    "rule_evaluations": [
+      {
+        "rule": "baseline_healthy",
+        "passed": true,
+        "message": "Target met baseline readiness (1 ready, expected >= 1).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "fault_injected",
+        "passed": true,
+        "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+        "observed": "Injected",
+        "expected": "Injected"
+      },
+      {
+        "rule": "target_impact",
+        "passed": true,
+        "message": "Target pod disappearance confirmed (paymentservice-5df7f57d78-7z77p).",
+        "observed": true,
+        "expected": true
+      },
+      {
+        "rule": "service_recovery",
+        "passed": true,
+        "message": "Service recovered 1 ready replica(s) (replacement: paymentservice-5df7f57d78-72krd).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "recovery_within_timeout",
+        "passed": true,
+        "message": "Service recovered in 12.29s (within limit of 60.0s).",
+        "observed": 12.29,
+        "expected": "<=60.0s"
+      }
+    ]
+  }
+}
