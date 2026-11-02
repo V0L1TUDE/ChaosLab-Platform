@@ -1,0 +1,27 @@
+name: checkout-service-pod-kill
+
+target:
+  namespace: default
+  label:
+    app: checkoutservice
+
+fault:
+  type: pod-kill
+  mode: one
+
+recovery:
+  timeout_seconds: 60
+
+verification:
+  expected_ready_replicas: 1
+  application:
+    enabled: true
+    grpc_health_check: true
+    expected_health_status: "SERVING"
+    functional_test: false
+    verify_logs: true
+    expected_log_pattern: "starting to listen on tcp"
+  telemetry:
+    enabled: true
+    service_name: "checkoutservice"
+    max_allowed_p95_ms: 1000

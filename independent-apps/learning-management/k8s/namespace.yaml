@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: learning-platform
+  labels:
+    app.kubernetes.io/part-of: chaoslab-evaluation-suite
+    app.kubernetes.io/component: learning-management

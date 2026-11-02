@@ -1,0 +1,1199 @@
+{
+  "timestamp": "2026-11-02T03:55:59.057651+00:00",
+  "total_experiments": 9,
+  "passed_count": 9,
+  "failed_count": 0,
+  "all_passed": true,
+  "results": [
+    {
+      "name": "lms-course-network-delay",
+      "application_group": "Learning Management System (LMS)",
+      "target": "course-service",
+      "namespace": "learning-platform",
+      "fault": "network-delay",
+      "passed": true,
+      "recovery_time_seconds": 0.5,
+      "telemetry": {
+        "available": true,
+        "traces_count": 3,
+        "spans_count": 9,
+        "error_spans_count": 0,
+        "error_rate_pct": 0.0,
+        "latency_ms": {
+          "min": 0.01,
+          "avg": 0.37,
+          "p50": 0.03,
+          "p95": 1.18,
+          "max": 1.28
+        },
+        "sample_trace_ids": [
+          "b7a6bb8a8d9021eb8143655915e39327",
+          "520b685d02715b39ed3e71451bd25883",
+          "65c9762eca0384610ec23399d99a040e"
+        ],
+        "operations": [
+          "GET /health",
+          "GET /health http send"
+        ],
+        "service": "course-service",
+        "fault_window_errors": 0
+      },
+      "oracle_evaluation": {
+        "verdict": "PASS",
+        "total_rules": 11,
+        "applicable_rules": 8,
+        "executed_rules": 8,
+        "passed_rules": 8,
+        "failed_rules": 0,
+        "skipped_rules": 3,
+        "all_rules_passed": true,
+        "failure_reasons": [],
+        "rule_evaluations": [
+          {
+            "rule": "baseline_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target met baseline readiness (1 ready, expected >= 1).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "fault_injected",
+            "passed": true,
+            "status": "PASS",
+            "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+            "observed": "Injected",
+            "expected": "Injected"
+          },
+          {
+            "rule": "target_impact",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Pod termination not applicable for network fault 'network-delay'.",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "service_recovery",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered 1 ready replica(s) (replacement: course-service-5dbf4b5855-jrwdx).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "recovery_within_timeout",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered in 0.50s (within limit of 60.0s).",
+            "observed": "0.50s",
+            "expected": "<=60.0s"
+          },
+          {
+            "rule": "app_health_probe",
+            "passed": true,
+            "status": "PASS",
+            "message": "Application health probe (HTTP) verified: status 200 OK.",
+            "observed": "200 OK",
+            "expected": "SERVING/200 OK"
+          },
+          {
+            "rule": "app_functional_check",
+            "passed": true,
+            "status": "PASS",
+            "message": "Functional transaction verified successfully (Entity ID: crs-101).",
+            "observed": "crs-101",
+            "expected": "CONFIRMED_OK"
+          },
+          {
+            "rule": "app_logs_healthy",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Container logs verification skipped (not enabled in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_traces_recorded",
+            "passed": true,
+            "status": "PASS",
+            "message": "Distributed tracing active: 3 traces (9 spans) captured for 'course-service'.",
+            "observed": 3,
+            "expected": ">0"
+          },
+          {
+            "rule": "telemetry_error_spike_detected",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Error spike verification skipped (optional check not required in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_latency_recovered",
+            "passed": true,
+            "status": "PASS",
+            "message": "Latency SLA verified: p95 latency 1.18ms within threshold (<=1500.0ms).",
+            "observed": "1.18ms",
+            "expected": "<=1500.0ms"
+          }
+        ]
+      }
+    },
+    {
+      "name": "lms-course-pod-kill",
+      "application_group": "Learning Management System (LMS)",
+      "target": "course-service",
+      "namespace": "learning-platform",
+      "fault": "pod-kill",
+      "passed": true,
+      "recovery_time_seconds": 7.43,
+      "telemetry": {
+        "available": true,
+        "traces_count": 1,
+        "spans_count": 3,
+        "error_spans_count": 0,
+        "error_rate_pct": 0.0,
+        "latency_ms": {
+          "min": 0.02,
+          "avg": 4.26,
+          "p50": 0.05,
+          "p95": 11.45,
+          "max": 12.72
+        },
+        "sample_trace_ids": [
+          "a9eddffc6920533027589d721f750f95"
+        ],
+        "operations": [
+          "GET /health",
+          "GET /health http send"
+        ],
+        "service": "course-service",
+        "fault_window_errors": 0
+      },
+      "oracle_evaluation": {
+        "verdict": "PASS",
+        "total_rules": 11,
+        "applicable_rules": 10,
+        "executed_rules": 10,
+        "passed_rules": 10,
+        "failed_rules": 0,
+        "skipped_rules": 1,
+        "all_rules_passed": true,
+        "failure_reasons": [],
+        "rule_evaluations": [
+          {
+            "rule": "baseline_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target met baseline readiness (1 ready, expected >= 1).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "fault_injected",
+            "passed": true,
+            "status": "PASS",
+            "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+            "observed": "Injected",
+            "expected": "Injected"
+          },
+          {
+            "rule": "target_impact",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target pod disappearance confirmed (course-service-5dbf4b5855-jrwdx).",
+            "observed": true,
+            "expected": true
+          },
+          {
+            "rule": "service_recovery",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered 1 ready replica(s) (replacement: course-service-5dbf4b5855-2dhjx).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "recovery_within_timeout",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered in 7.43s (within limit of 60.0s).",
+            "observed": "7.43s",
+            "expected": "<=60.0s"
+          },
+          {
+            "rule": "app_health_probe",
+            "passed": true,
+            "status": "PASS",
+            "message": "Application health probe (HTTP) verified: status 200 OK.",
+            "observed": "200 OK",
+            "expected": "SERVING/200 OK"
+          },
+          {
+            "rule": "app_functional_check",
+            "passed": true,
+            "status": "PASS",
+            "message": "Functional transaction verified successfully (Entity ID: crs-101).",
+            "observed": "crs-101",
+            "expected": "CONFIRMED_OK"
+          },
+          {
+            "rule": "app_logs_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Container logs confirmed clean startup (found 'Uvicorn running', 0 fatal errors).",
+            "observed": "startup=True, errors=0",
+            "expected": "startup=True, errors=0"
+          },
+          {
+            "rule": "telemetry_traces_recorded",
+            "passed": true,
+            "status": "PASS",
+            "message": "Distributed tracing active: 1 traces (3 spans) captured for 'course-service'.",
+            "observed": 1,
+            "expected": ">0"
+          },
+          {
+            "rule": "telemetry_error_spike_detected",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Error spike verification skipped (optional check not required in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_latency_recovered",
+            "passed": true,
+            "status": "PASS",
+            "message": "Latency SLA verified: p95 latency 11.45ms within threshold (<=1000.0ms).",
+            "observed": "11.45ms",
+            "expected": "<=1000.0ms"
+          }
+        ]
+      }
+    },
+    {
+      "name": "lms-enrollment-pod-kill",
+      "application_group": "Learning Management System (LMS)",
+      "target": "enrollment-service",
+      "namespace": "learning-platform",
+      "fault": "pod-kill",
+      "passed": true,
+      "recovery_time_seconds": 7.58,
+      "telemetry": {
+        "available": true,
+        "traces_count": 1,
+        "spans_count": 3,
+        "error_spans_count": 0,
+        "error_rate_pct": 0.0,
+        "latency_ms": {
+          "min": 0.01,
+          "avg": 4.7,
+          "p50": 0.05,
+          "p95": 12.63,
+          "max": 14.03
+        },
+        "sample_trace_ids": [
+          "aa5aa5c701569b81f424566fd20a8851"
+        ],
+        "operations": [
+          "GET /health",
+          "GET /health http send"
+        ],
+        "service": "enrollment-service",
+        "fault_window_errors": 0
+      },
+      "oracle_evaluation": {
+        "verdict": "PASS",
+        "total_rules": 11,
+        "applicable_rules": 10,
+        "executed_rules": 10,
+        "passed_rules": 10,
+        "failed_rules": 0,
+        "skipped_rules": 1,
+        "all_rules_passed": true,
+        "failure_reasons": [],
+        "rule_evaluations": [
+          {
+            "rule": "baseline_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target met baseline readiness (1 ready, expected >= 1).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "fault_injected",
+            "passed": true,
+            "status": "PASS",
+            "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+            "observed": "Injected",
+            "expected": "Injected"
+          },
+          {
+            "rule": "target_impact",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target pod disappearance confirmed (enrollment-service-5899bc9774-h626w).",
+            "observed": true,
+            "expected": true
+          },
+          {
+            "rule": "service_recovery",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered 1 ready replica(s) (replacement: enrollment-service-5899bc9774-5xmjx).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "recovery_within_timeout",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered in 7.58s (within limit of 60.0s).",
+            "observed": "7.58s",
+            "expected": "<=60.0s"
+          },
+          {
+            "rule": "app_health_probe",
+            "passed": true,
+            "status": "PASS",
+            "message": "Application health probe (HTTP) verified: status 200 OK.",
+            "observed": "200 OK",
+            "expected": "SERVING/200 OK"
+          },
+          {
+            "rule": "app_functional_check",
+            "passed": true,
+            "status": "PASS",
+            "message": "Functional transaction verified successfully (Entity ID: enr-test-probe).",
+            "observed": "enr-test-probe",
+            "expected": "CONFIRMED_OK"
+          },
+          {
+            "rule": "app_logs_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Container logs confirmed clean startup (found 'Uvicorn running', 0 fatal errors).",
+            "observed": "startup=True, errors=0",
+            "expected": "startup=True, errors=0"
+          },
+          {
+            "rule": "telemetry_traces_recorded",
+            "passed": true,
+            "status": "PASS",
+            "message": "Distributed tracing active: 1 traces (3 spans) captured for 'enrollment-service'.",
+            "observed": 1,
+            "expected": ">0"
+          },
+          {
+            "rule": "telemetry_error_spike_detected",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Error spike verification skipped (optional check not required in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_latency_recovered",
+            "passed": true,
+            "status": "PASS",
+            "message": "Latency SLA verified: p95 latency 12.63ms within threshold (<=1000.0ms).",
+            "observed": "12.63ms",
+            "expected": "<=1000.0ms"
+          }
+        ]
+      }
+    },
+    {
+      "name": "cart-service-pod-kill",
+      "application_group": "Google Online Boutique",
+      "target": "cartservice",
+      "namespace": "default",
+      "fault": "pod-kill",
+      "passed": true,
+      "recovery_time_seconds": 23.0,
+      "telemetry": {
+        "enabled": false
+      },
+      "oracle_evaluation": {
+        "verdict": "PASS",
+        "total_rules": 11,
+        "applicable_rules": 7,
+        "executed_rules": 7,
+        "passed_rules": 7,
+        "failed_rules": 0,
+        "skipped_rules": 4,
+        "all_rules_passed": true,
+        "failure_reasons": [],
+        "rule_evaluations": [
+          {
+            "rule": "baseline_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target met baseline readiness (1 ready, expected >= 1).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "fault_injected",
+            "passed": true,
+            "status": "PASS",
+            "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+            "observed": "Injected",
+            "expected": "Injected"
+          },
+          {
+            "rule": "target_impact",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target pod disappearance confirmed (cartservice-9479b6c-pcljw).",
+            "observed": true,
+            "expected": true
+          },
+          {
+            "rule": "service_recovery",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered 1 ready replica(s) (replacement: cartservice-9479b6c-zsr9w).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "recovery_within_timeout",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered in 23.00s (within limit of 60.0s).",
+            "observed": "23.00s",
+            "expected": "<=60.0s"
+          },
+          {
+            "rule": "app_health_probe",
+            "passed": true,
+            "status": "PASS",
+            "message": "Application health probe (GRPC) verified: status SERVING.",
+            "observed": "SERVING",
+            "expected": "SERVING/200 OK"
+          },
+          {
+            "rule": "app_functional_check",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Functional transaction test not configured for this experiment.",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "app_logs_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Container logs confirmed clean startup (found 'Application started', 0 fatal errors).",
+            "observed": "startup=True, errors=0",
+            "expected": "startup=True, errors=0"
+          },
+          {
+            "rule": "telemetry_traces_recorded",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Distributed tracing verification skipped (not enabled in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_error_spike_detected",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Error spike verification skipped (optional check not required in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_latency_recovered",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Latency SLA verification skipped (not enabled in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          }
+        ]
+      }
+    },
+    {
+      "name": "checkout-service-pod-kill",
+      "application_group": "Google Online Boutique",
+      "target": "checkoutservice",
+      "namespace": "default",
+      "fault": "pod-kill",
+      "passed": true,
+      "recovery_time_seconds": 2.83,
+      "telemetry": {
+        "available": true,
+        "traces_count": 1,
+        "spans_count": 1,
+        "error_spans_count": 0,
+        "error_rate_pct": 0.0,
+        "latency_ms": {
+          "min": 1.05,
+          "avg": 1.05,
+          "p50": 1.05,
+          "p95": 1.05,
+          "max": 1.05
+        },
+        "sample_trace_ids": [
+          "9d957cdea27c70b436d23e95c4c4694b"
+        ],
+        "operations": [
+          "grpc.health.v1.Health/Check"
+        ],
+        "service": "checkoutservice",
+        "fault_window_errors": 0
+      },
+      "oracle_evaluation": {
+        "verdict": "PASS",
+        "total_rules": 11,
+        "applicable_rules": 9,
+        "executed_rules": 9,
+        "passed_rules": 9,
+        "failed_rules": 0,
+        "skipped_rules": 2,
+        "all_rules_passed": true,
+        "failure_reasons": [],
+        "rule_evaluations": [
+          {
+            "rule": "baseline_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target met baseline readiness (1 ready, expected >= 1).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "fault_injected",
+            "passed": true,
+            "status": "PASS",
+            "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+            "observed": "Injected",
+            "expected": "Injected"
+          },
+          {
+            "rule": "target_impact",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target pod disappearance confirmed (checkoutservice-8775ddc9-g6g4b).",
+            "observed": true,
+            "expected": true
+          },
+          {
+            "rule": "service_recovery",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered 1 ready replica(s) (replacement: checkoutservice-8775ddc9-wsxjz).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "recovery_within_timeout",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered in 2.83s (within limit of 60.0s).",
+            "observed": "2.83s",
+            "expected": "<=60.0s"
+          },
+          {
+            "rule": "app_health_probe",
+            "passed": true,
+            "status": "PASS",
+            "message": "Application health probe (GRPC) verified: status SERVING.",
+            "observed": "SERVING",
+            "expected": "SERVING/200 OK"
+          },
+          {
+            "rule": "app_functional_check",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Functional transaction test not configured for this experiment.",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "app_logs_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Container logs confirmed clean startup (found 'starting to listen on tcp', 0 fatal errors).",
+            "observed": "startup=True, errors=0",
+            "expected": "startup=True, errors=0"
+          },
+          {
+            "rule": "telemetry_traces_recorded",
+            "passed": true,
+            "status": "PASS",
+            "message": "Distributed tracing active: 1 traces (1 spans) captured for 'checkoutservice'.",
+            "observed": 1,
+            "expected": ">0"
+          },
+          {
+            "rule": "telemetry_error_spike_detected",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Error spike verification skipped (optional check not required in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_latency_recovered",
+            "passed": true,
+            "status": "PASS",
+            "message": "Latency SLA verified: p95 latency 1.05ms within threshold (<=1000.0ms).",
+            "observed": "1.05ms",
+            "expected": "<=1000.0ms"
+          }
+        ]
+      }
+    },
+    {
+      "name": "payment-service-pod-kill",
+      "application_group": "Google Online Boutique",
+      "target": "paymentservice",
+      "namespace": "default",
+      "fault": "pod-kill",
+      "passed": true,
+      "recovery_time_seconds": 23.41,
+      "telemetry": {
+        "available": true,
+        "traces_count": 4,
+        "spans_count": 4,
+        "error_spans_count": 0,
+        "error_rate_pct": 0.0,
+        "latency_ms": {
+          "min": 0.1,
+          "avg": 0.66,
+          "p50": 0.2,
+          "p95": 1.86,
+          "max": 2.13
+        },
+        "sample_trace_ids": [
+          "12815de23ed7c7147c84aea1bc5cb1fc",
+          "e2ba80f09b368a10bff9db8c3259d82d",
+          "c5148168b222c246bd42e394a7455750",
+          "fee4fcb741312c3db1c8d21cc1531a63"
+        ],
+        "operations": [
+          "grpc.grpc.health.v1.Health/Check",
+          "grpc.hipstershop.PaymentService/Charge"
+        ],
+        "service": "paymentservice",
+        "fault_window_errors": 0
+      },
+      "oracle_evaluation": {
+        "verdict": "PASS",
+        "total_rules": 11,
+        "applicable_rules": 10,
+        "executed_rules": 10,
+        "passed_rules": 10,
+        "failed_rules": 0,
+        "skipped_rules": 1,
+        "all_rules_passed": true,
+        "failure_reasons": [],
+        "rule_evaluations": [
+          {
+            "rule": "baseline_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target met baseline readiness (1 ready, expected >= 1).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "fault_injected",
+            "passed": true,
+            "status": "PASS",
+            "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+            "observed": "Injected",
+            "expected": "Injected"
+          },
+          {
+            "rule": "target_impact",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target pod disappearance confirmed (paymentservice-879f99cd5-h6ssh).",
+            "observed": true,
+            "expected": true
+          },
+          {
+            "rule": "service_recovery",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered 1 ready replica(s) (replacement: paymentservice-879f99cd5-fh5gt).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "recovery_within_timeout",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered in 23.41s (within limit of 60.0s).",
+            "observed": "23.41s",
+            "expected": "<=60.0s"
+          },
+          {
+            "rule": "app_health_probe",
+            "passed": true,
+            "status": "PASS",
+            "message": "Application health probe (GRPC) verified: status SERVING.",
+            "observed": "SERVING",
+            "expected": "SERVING/200 OK"
+          },
+          {
+            "rule": "app_functional_check",
+            "passed": true,
+            "status": "PASS",
+            "message": "Functional transaction verified successfully (Entity ID: 1f2b6958-acf5-466d-8fb1-0b383aaa2abb).",
+            "observed": "1f2b6958-acf5-466d-8fb1-0b383aaa2abb",
+            "expected": "CONFIRMED_OK"
+          },
+          {
+            "rule": "app_logs_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Container logs confirmed clean startup (found 'PaymentService gRPC server started', 0 fatal errors).",
+            "observed": "startup=True, errors=0",
+            "expected": "startup=True, errors=0"
+          },
+          {
+            "rule": "telemetry_traces_recorded",
+            "passed": true,
+            "status": "PASS",
+            "message": "Distributed tracing active: 4 traces (4 spans) captured for 'paymentservice'.",
+            "observed": 4,
+            "expected": ">0"
+          },
+          {
+            "rule": "telemetry_error_spike_detected",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Error spike verification skipped (optional check not required in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_latency_recovered",
+            "passed": true,
+            "status": "PASS",
+            "message": "Latency SLA verified: p95 latency 1.86ms within threshold (<=1000.0ms).",
+            "observed": "1.86ms",
+            "expected": "<=1000.0ms"
+          }
+        ]
+      }
+    },
+    {
+      "name": "project-service-pod-kill",
+      "application_group": "Project Management Platform",
+      "target": "project-service",
+      "namespace": "project-platform",
+      "fault": "pod-kill",
+      "passed": true,
+      "recovery_time_seconds": 6.26,
+      "telemetry": {
+        "available": true,
+        "traces_count": 1,
+        "spans_count": 3,
+        "error_spans_count": 0,
+        "error_rate_pct": 0.0,
+        "latency_ms": {
+          "min": 0.02,
+          "avg": 4.98,
+          "p50": 0.07,
+          "p95": 13.36,
+          "max": 14.83
+        },
+        "sample_trace_ids": [
+          "3b4b44b92e1e714d2a3cf1274e868992"
+        ],
+        "operations": [
+          "GET /health",
+          "GET /health http send"
+        ],
+        "service": "project-service",
+        "fault_window_errors": 0
+      },
+      "oracle_evaluation": {
+        "verdict": "PASS",
+        "total_rules": 11,
+        "applicable_rules": 10,
+        "executed_rules": 10,
+        "passed_rules": 10,
+        "failed_rules": 0,
+        "skipped_rules": 1,
+        "all_rules_passed": true,
+        "failure_reasons": [],
+        "rule_evaluations": [
+          {
+            "rule": "baseline_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target met baseline readiness (1 ready, expected >= 1).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "fault_injected",
+            "passed": true,
+            "status": "PASS",
+            "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+            "observed": "Injected",
+            "expected": "Injected"
+          },
+          {
+            "rule": "target_impact",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target pod disappearance confirmed (project-service-58ddf5f844-s9jjr).",
+            "observed": true,
+            "expected": true
+          },
+          {
+            "rule": "service_recovery",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered 1 ready replica(s) (replacement: project-service-58ddf5f844-5rql8).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "recovery_within_timeout",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered in 6.26s (within limit of 60.0s).",
+            "observed": "6.26s",
+            "expected": "<=60.0s"
+          },
+          {
+            "rule": "app_health_probe",
+            "passed": true,
+            "status": "PASS",
+            "message": "Application health probe (HTTP) verified: status 200 OK.",
+            "observed": "200 OK",
+            "expected": "SERVING/200 OK"
+          },
+          {
+            "rule": "app_functional_check",
+            "passed": true,
+            "status": "PASS",
+            "message": "Functional transaction verified successfully (Entity ID: proj-101).",
+            "observed": "proj-101",
+            "expected": "CONFIRMED_OK"
+          },
+          {
+            "rule": "app_logs_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Container logs confirmed clean startup (found 'Uvicorn running', 0 fatal errors).",
+            "observed": "startup=True, errors=0",
+            "expected": "startup=True, errors=0"
+          },
+          {
+            "rule": "telemetry_traces_recorded",
+            "passed": true,
+            "status": "PASS",
+            "message": "Distributed tracing active: 1 traces (3 spans) captured for 'project-service'.",
+            "observed": 1,
+            "expected": ">0"
+          },
+          {
+            "rule": "telemetry_error_spike_detected",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Error spike verification skipped (optional check not required in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_latency_recovered",
+            "passed": true,
+            "status": "PASS",
+            "message": "Latency SLA verified: p95 latency 13.36ms within threshold (<=1000.0ms).",
+            "observed": "13.36ms",
+            "expected": "<=1000.0ms"
+          }
+        ]
+      }
+    },
+    {
+      "name": "project-task-network-delay",
+      "application_group": "Project Management Platform",
+      "target": "task-service",
+      "namespace": "project-platform",
+      "fault": "network-delay",
+      "passed": true,
+      "recovery_time_seconds": 0.5,
+      "telemetry": {
+        "available": true,
+        "traces_count": 3,
+        "spans_count": 18,
+        "error_spans_count": 0,
+        "error_rate_pct": 0.0,
+        "latency_ms": {
+          "min": 0.01,
+          "avg": 137.2,
+          "p50": 0.04,
+          "p95": 706.55,
+          "max": 1227.51
+        },
+        "sample_trace_ids": [
+          "eae0fd4f826489edc220714c5ecefb08",
+          "3efd48687a39ec4feeee9e73beddd90e",
+          "84b56b7c471a53bf2532fb9b977fb037"
+        ],
+        "operations": [
+          "GET",
+          "GET /health",
+          "GET /health http send",
+          "GET /projects/{project_id}",
+          "GET /projects/{project_id} http send",
+          "GET /tasks/test",
+          "GET /tasks/test http send",
+          "GET /users/{user_id}",
+          "GET /users/{user_id} http send"
+        ],
+        "service": "task-service",
+        "fault_window_errors": 0
+      },
+      "oracle_evaluation": {
+        "verdict": "PASS",
+        "total_rules": 11,
+        "applicable_rules": 8,
+        "executed_rules": 8,
+        "passed_rules": 8,
+        "failed_rules": 0,
+        "skipped_rules": 3,
+        "all_rules_passed": true,
+        "failure_reasons": [],
+        "rule_evaluations": [
+          {
+            "rule": "baseline_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target met baseline readiness (1 ready, expected >= 1).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "fault_injected",
+            "passed": true,
+            "status": "PASS",
+            "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+            "observed": "Injected",
+            "expected": "Injected"
+          },
+          {
+            "rule": "target_impact",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Pod termination not applicable for network fault 'network-delay'.",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "service_recovery",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered 1 ready replica(s) (replacement: task-service-847574b4d6-6sktv).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "recovery_within_timeout",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered in 0.50s (within limit of 60.0s).",
+            "observed": "0.50s",
+            "expected": "<=60.0s"
+          },
+          {
+            "rule": "app_health_probe",
+            "passed": true,
+            "status": "PASS",
+            "message": "Application health probe (HTTP) verified: status 200 OK.",
+            "observed": "200 OK",
+            "expected": "SERVING/200 OK"
+          },
+          {
+            "rule": "app_functional_check",
+            "passed": true,
+            "status": "PASS",
+            "message": "Functional transaction verified successfully (Entity ID: task-test-probe).",
+            "observed": "task-test-probe",
+            "expected": "CONFIRMED_OK"
+          },
+          {
+            "rule": "app_logs_healthy",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Container logs verification skipped (not enabled in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_traces_recorded",
+            "passed": true,
+            "status": "PASS",
+            "message": "Distributed tracing active: 3 traces (18 spans) captured for 'task-service'.",
+            "observed": 3,
+            "expected": ">0"
+          },
+          {
+            "rule": "telemetry_error_spike_detected",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Error spike verification skipped (optional check not required in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_latency_recovered",
+            "passed": true,
+            "status": "PASS",
+            "message": "Latency SLA verified: p95 latency 706.55ms within threshold (<=1500.0ms).",
+            "observed": "706.55ms",
+            "expected": "<=1500.0ms"
+          }
+        ]
+      }
+    },
+    {
+      "name": "project-task-pod-kill",
+      "application_group": "Project Management Platform",
+      "target": "task-service",
+      "namespace": "project-platform",
+      "fault": "pod-kill",
+      "passed": true,
+      "recovery_time_seconds": 7.42,
+      "telemetry": {
+        "available": true,
+        "traces_count": 1,
+        "spans_count": 3,
+        "error_spans_count": 0,
+        "error_rate_pct": 0.0,
+        "latency_ms": {
+          "min": 0.02,
+          "avg": 3.87,
+          "p50": 0.05,
+          "p95": 10.4,
+          "max": 11.55
+        },
+        "sample_trace_ids": [
+          "76a8b3f04ed22b5cfd00aef3a5080c6b"
+        ],
+        "operations": [
+          "GET /health",
+          "GET /health http send"
+        ],
+        "service": "task-service",
+        "fault_window_errors": 0
+      },
+      "oracle_evaluation": {
+        "verdict": "PASS",
+        "total_rules": 11,
+        "applicable_rules": 10,
+        "executed_rules": 10,
+        "passed_rules": 10,
+        "failed_rules": 0,
+        "skipped_rules": 1,
+        "all_rules_passed": true,
+        "failure_reasons": [],
+        "rule_evaluations": [
+          {
+            "rule": "baseline_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target met baseline readiness (1 ready, expected >= 1).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "fault_injected",
+            "passed": true,
+            "status": "PASS",
+            "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+            "observed": "Injected",
+            "expected": "Injected"
+          },
+          {
+            "rule": "target_impact",
+            "passed": true,
+            "status": "PASS",
+            "message": "Target pod disappearance confirmed (task-service-847574b4d6-6sktv).",
+            "observed": true,
+            "expected": true
+          },
+          {
+            "rule": "service_recovery",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered 1 ready replica(s) (replacement: task-service-847574b4d6-nrvd7).",
+            "observed": 1,
+            "expected": ">=1"
+          },
+          {
+            "rule": "recovery_within_timeout",
+            "passed": true,
+            "status": "PASS",
+            "message": "Service recovered in 7.42s (within limit of 60.0s).",
+            "observed": "7.42s",
+            "expected": "<=60.0s"
+          },
+          {
+            "rule": "app_health_probe",
+            "passed": true,
+            "status": "PASS",
+            "message": "Application health probe (HTTP) verified: status 200 OK.",
+            "observed": "200 OK",
+            "expected": "SERVING/200 OK"
+          },
+          {
+            "rule": "app_functional_check",
+            "passed": true,
+            "status": "PASS",
+            "message": "Functional transaction verified successfully (Entity ID: task-test-probe).",
+            "observed": "task-test-probe",
+            "expected": "CONFIRMED_OK"
+          },
+          {
+            "rule": "app_logs_healthy",
+            "passed": true,
+            "status": "PASS",
+            "message": "Container logs confirmed clean startup (found 'Uvicorn running', 0 fatal errors).",
+            "observed": "startup=True, errors=0",
+            "expected": "startup=True, errors=0"
+          },
+          {
+            "rule": "telemetry_traces_recorded",
+            "passed": true,
+            "status": "PASS",
+            "message": "Distributed tracing active: 1 traces (3 spans) captured for 'task-service'.",
+            "observed": 1,
+            "expected": ">0"
+          },
+          {
+            "rule": "telemetry_error_spike_detected",
+            "passed": true,
+            "status": "NOT_APPLICABLE",
+            "message": "Error spike verification skipped (optional check not required in config).",
+            "observed": "N/A",
+            "expected": "N/A"
+          },
+          {
+            "rule": "telemetry_latency_recovered",
+            "passed": true,
+            "status": "PASS",
+            "message": "Latency SLA verified: p95 latency 10.40ms within threshold (<=1000.0ms).",
+            "observed": "10.40ms",
+            "expected": "<=1000.0ms"
+          }
+        ]
+      }
+    }
+  ]
+}

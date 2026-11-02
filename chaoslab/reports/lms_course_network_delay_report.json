@@ -1,0 +1,439 @@
+{
+  "experiment": "lms-course-network-delay",
+  "application_group": "Learning Management System (LMS)",
+  "target": "course-service",
+  "namespace": "learning-platform",
+  "fault": "network-delay",
+  "baseline": {
+    "pod_name": "course-service-5dbf4b5855-jrwdx",
+    "ready": "1/1",
+    "status": "Running",
+    "ready_replicas": 1,
+    "ip": "10.244.0.44",
+    "node": "desktop-control-plane"
+  },
+  "timestamps": {
+    "experiment_start": "2026-11-02T03:53:26.429931+00:00",
+    "fault_injected": "2026-11-02T03:53:26.873316+00:00",
+    "original_pod_disappeared": null,
+    "replacement_ready": "2026-11-02T03:53:31.873798+00:00",
+    "experiment_end": "2026-11-02T03:53:37.974721+00:00"
+  },
+  "original_pod": "course-service-5dbf4b5855-jrwdx",
+  "fault_injected": true,
+  "original_pod_disappeared": false,
+  "replacement_pod": "course-service-5dbf4b5855-jrwdx",
+  "replacement_ready": true,
+  "recovered_ready_replicas": 1,
+  "recovery_time_seconds": 0.5,
+  "total_recovery_seconds": 5.0,
+  "application": {
+    "enabled": true,
+    "probed_pod": "course-service-5dbf4b5855-jrwdx",
+    "probe_type": "http",
+    "health_check_passed": true,
+    "health_status": "200 OK",
+    "functional_test_passed": true,
+    "transaction_id": "crs-101",
+    "logs_verified": false,
+    "startup_log_detected": false,
+    "log_error_count": 0,
+    "health_details": {
+      "passed": true,
+      "health_status": "200 OK",
+      "status_code": 200,
+      "body": "{\"status\":\"SERVING\",\"service\":\"course-service\",\"total_courses\":3,\"version\":\"1.0.0\"}",
+      "details": "HTTP GET http://localhost:8012/health returned 200"
+    },
+    "functional_details": {
+      "passed": true,
+      "status_code": 200,
+      "transaction_id": "crs-101",
+      "response_body": "[{\"id\":\"crs-101\",\"title\":\"Production Kubernetes & Chaos Engineering\",\"instructor\":\"Dr. Aris Thorne\",\"category\":\"Cloud Infrastructure\",\"level\":\"Advanced\",\"lessons_count\":12,\"duration_hours\":18,\"rating\":4.9,\"description\":\"Master failure injection, PodChaos, NetworkChaos, and automated recovery oracles on Kubernetes.\"},{\"id\":\"crs-102\",\"title\":\"Distributed Systems Observability with OpenTelemetry\",\"instructor\":\"Maya Lin\",\"category\":\"DevOps & Reliability\",\"level\":\"Intermediate\",\"lessons_count\":8,\"dur",
+      "parsed_json": [
+        {
+          "id": "crs-101",
+          "title": "Production Kubernetes & Chaos Engineering",
+          "instructor": "Dr. Aris Thorne",
+          "category": "Cloud Infrastructure",
+          "level": "Advanced",
+          "lessons_count": 12,
+          "duration_hours": 18,
+          "rating": 4.9,
+          "description": "Master failure injection, PodChaos, NetworkChaos, and automated recovery oracles on Kubernetes."
+        },
+        {
+          "id": "crs-102",
+          "title": "Distributed Systems Observability with OpenTelemetry",
+          "instructor": "Maya Lin",
+          "category": "DevOps & Reliability",
+          "level": "Intermediate",
+          "lessons_count": 8,
+          "duration_hours": 10,
+          "rating": 4.8,
+          "description": "Instrument multi-language microservices with W3C trace context, Jaeger, and SLA metrics."
+        },
+        {
+          "id": "crs-103",
+          "title": "Modern Microservice Architectures with FastAPI",
+          "instructor": "Kenji Sato",
+          "category": "Software Architecture",
+          "level": "Intermediate",
+          "lessons_count": 10,
+          "duration_hours": 14,
+          "rating": 4.7,
+          "description": "Design event-driven, decoupled REST and gRPC microservices with async Python."
+        }
+      ],
+      "details": "Functional GET http://localhost:8012/courses returned 200 (ID: crs-101)"
+    }
+  },
+  "telemetry": {
+    "available": true,
+    "traces_count": 3,
+    "spans_count": 9,
+    "error_spans_count": 0,
+    "error_rate_pct": 0.0,
+    "latency_ms": {
+      "min": 0.01,
+      "avg": 0.37,
+      "p50": 0.03,
+      "p95": 1.18,
+      "max": 1.28
+    },
+    "sample_trace_ids": [
+      "b7a6bb8a8d9021eb8143655915e39327",
+      "520b685d02715b39ed3e71451bd25883",
+      "65c9762eca0384610ec23399d99a040e"
+    ],
+    "operations": [
+      "GET /health",
+      "GET /health http send"
+    ],
+    "service": "course-service",
+    "fault_window_errors": 0
+  },
+  "chaos_mesh_evidence": {
+    "conditions": [
+      {
+        "status": "True",
+        "type": "Selected"
+      },
+      {
+        "status": "True",
+        "type": "AllInjected"
+      },
+      {
+        "status": "False",
+        "type": "AllRecovered"
+      },
+      {
+        "status": "False",
+        "type": "Paused"
+      }
+    ],
+    "container_records": [
+      {
+        "events": [
+          {
+            "operation": "Apply",
+            "timestamp": "2026-11-02T03:53:26Z",
+            "type": "Succeeded"
+          }
+        ],
+        "id": "learning-platform/course-service-5dbf4b5855-jrwdx",
+        "injectedCount": 1,
+        "phase": "Injected",
+        "recoveredCount": 0,
+        "selectorKey": "."
+      }
+    ],
+    "injected": true,
+    "raw_status": {
+      "conditions": [
+        {
+          "status": "True",
+          "type": "Selected"
+        },
+        {
+          "status": "True",
+          "type": "AllInjected"
+        },
+        {
+          "status": "False",
+          "type": "AllRecovered"
+        },
+        {
+          "status": "False",
+          "type": "Paused"
+        }
+      ],
+      "experiment": {
+        "containerRecords": [
+          {
+            "events": [
+              {
+                "operation": "Apply",
+                "timestamp": "2026-11-02T03:53:26Z",
+                "type": "Succeeded"
+              }
+            ],
+            "id": "learning-platform/course-service-5dbf4b5855-jrwdx",
+            "injectedCount": 1,
+            "phase": "Injected",
+            "recoveredCount": 0,
+            "selectorKey": "."
+          }
+        ],
+        "desiredPhase": "Run"
+      },
+      "instances": {
+        "learning-platform/course-service-5dbf4b5855-jrwdx": 1
+      }
+    }
+  },
+  "kubernetes_events": [
+    {
+      "reason": "Scheduled",
+      "message": "Successfully assigned learning-platform/course-service-5dbf4b5855-txfkh to desktop-control-plane",
+      "object": "pod/course-service-5dbf4b5855-txfkh",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:01Z"
+    },
+    {
+      "reason": "Pulling",
+      "message": "Pulling image \"lms-course-service:latest\"",
+      "object": "pod/course-service-5dbf4b5855-txfkh",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:02Z"
+    },
+    {
+      "reason": "Pulled",
+      "message": "Successfully pulled image \"lms-course-service:latest\" in 217ms (6.745s including waiting). Image size: 70251827 bytes.",
+      "object": "pod/course-service-5dbf4b5855-txfkh",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:08Z"
+    },
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/course-service-5dbf4b5855-txfkh",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:08Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/course-service-5dbf4b5855-txfkh",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:09Z"
+    },
+    {
+      "reason": "Killing",
+      "message": "Stopping container course-service",
+      "object": "pod/course-service-5dbf4b5855-txfkh",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:50:25Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: course-service-5dbf4b5855-txfkh",
+      "object": "replicaset/course-service-5dbf4b5855",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:01Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: course-service-5dbf4b5855-nhw7l",
+      "object": "replicaset/course-service-5dbf4b5855",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:50:25Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: course-service-5dbf4b5855-jrwdx",
+      "object": "replicaset/course-service-5dbf4b5855",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:52:44Z"
+    },
+    {
+      "reason": "ScalingReplicaSet",
+      "message": "Scaled up replica set course-service-5dbf4b5855 from 0 to 1",
+      "object": "deployment/course-service",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:01Z"
+    }
+  ],
+  "config": {
+    "name": "lms-course-network-delay",
+    "target": {
+      "namespace": "learning-platform",
+      "label": {
+        "app": "course-service"
+      }
+    },
+    "fault": {
+      "type": "network-delay",
+      "mode": "one",
+      "latency": "200ms",
+      "jitter": "10ms",
+      "duration": "15s"
+    },
+    "recovery": {
+      "timeout_seconds": 60,
+      "expected_ready_replicas": 1
+    },
+    "application": {
+      "enabled": true,
+      "health_probe": {
+        "type": "http",
+        "port": 8012,
+        "path": "/health",
+        "method": "GET",
+        "expected_status": 200
+      },
+      "functional_check": {
+        "enabled": true,
+        "type": "http",
+        "port": 8012,
+        "path": "/courses",
+        "method": "GET",
+        "expected_status": 200
+      }
+    },
+    "telemetry": {
+      "enabled": true,
+      "service_name": "course-service",
+      "max_allowed_p95_ms": 1500
+    },
+    "verification": {
+      "expected_ready_replicas": 1,
+      "application": {
+        "enabled": true,
+        "health_probe": {
+          "type": "http",
+          "port": 8012,
+          "path": "/health",
+          "method": "GET",
+          "expected_status": 200
+        },
+        "functional_check": {
+          "enabled": true,
+          "type": "http",
+          "port": 8012,
+          "path": "/courses",
+          "method": "GET",
+          "expected_status": 200
+        }
+      },
+      "telemetry": {
+        "enabled": true,
+        "service_name": "course-service",
+        "max_allowed_p95_ms": 1500
+      }
+    }
+  },
+  "verdict": "PASS",
+  "failure_reason": null,
+  "oracle_evaluation": {
+    "verdict": "PASS",
+    "total_rules": 11,
+    "applicable_rules": 8,
+    "executed_rules": 8,
+    "passed_rules": 8,
+    "failed_rules": 0,
+    "skipped_rules": 3,
+    "all_rules_passed": true,
+    "failure_reasons": [],
+    "rule_evaluations": [
+      {
+        "rule": "baseline_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target met baseline readiness (1 ready, expected >= 1).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "fault_injected",
+        "passed": true,
+        "status": "PASS",
+        "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+        "observed": "Injected",
+        "expected": "Injected"
+      },
+      {
+        "rule": "target_impact",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Pod termination not applicable for network fault 'network-delay'.",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "service_recovery",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered 1 ready replica(s) (replacement: course-service-5dbf4b5855-jrwdx).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "recovery_within_timeout",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered in 0.50s (within limit of 60.0s).",
+        "observed": "0.50s",
+        "expected": "<=60.0s"
+      },
+      {
+        "rule": "app_health_probe",
+        "passed": true,
+        "status": "PASS",
+        "message": "Application health probe (HTTP) verified: status 200 OK.",
+        "observed": "200 OK",
+        "expected": "SERVING/200 OK"
+      },
+      {
+        "rule": "app_functional_check",
+        "passed": true,
+        "status": "PASS",
+        "message": "Functional transaction verified successfully (Entity ID: crs-101).",
+        "observed": "crs-101",
+        "expected": "CONFIRMED_OK"
+      },
+      {
+        "rule": "app_logs_healthy",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Container logs verification skipped (not enabled in config).",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "telemetry_traces_recorded",
+        "passed": true,
+        "status": "PASS",
+        "message": "Distributed tracing active: 3 traces (9 spans) captured for 'course-service'.",
+        "observed": 3,
+        "expected": ">0"
+      },
+      {
+        "rule": "telemetry_error_spike_detected",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Error spike verification skipped (optional check not required in config).",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "telemetry_latency_recovered",
+        "passed": true,
+        "status": "PASS",
+        "message": "Latency SLA verified: p95 latency 1.18ms within threshold (<=1500.0ms).",
+        "observed": "1.18ms",
+        "expected": "<=1500.0ms"
+      }
+    ]
+  }
+}

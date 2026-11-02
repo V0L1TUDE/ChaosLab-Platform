@@ -1,0 +1,38 @@
+name: lms-course-network-delay
+
+target:
+  namespace: learning-platform
+  label:
+    app: course-service
+
+fault:
+  type: network-delay
+  mode: one
+  latency: "200ms"
+  jitter: "10ms"
+  duration: "15s"
+
+recovery:
+  timeout_seconds: 60
+  expected_ready_replicas: 1
+
+application:
+  enabled: true
+  health_probe:
+    type: http
+    port: 8012
+    path: /health
+    method: GET
+    expected_status: 200
+  functional_check:
+    enabled: true
+    type: http
+    port: 8012
+    path: /courses
+    method: GET
+    expected_status: 200
+
+telemetry:
+  enabled: true
+  service_name: "course-service"
+  max_allowed_p95_ms: 1500

@@ -1,10 +1,165 @@
-<!-- <p align="center">
-<img src="/src/frontend/static/icons/Hipster_HeroLogoMaroon.svg" width="300" alt="Online Boutique" />
-</p> -->
-![Continuous Integration](https://github.com/GoogleCloudPlatform/microservices-demo/workflows/Continuous%20Integration%20-%20Main/Release/badge.svg)
+# ChaosLab & Online Boutique: Cloud-Native Microservices & Universal Resilience Platform
 
-**Online Boutique** is a cloud-first microservices demo application.  The application is a
-web-based e-commerce app where users can browse items, add them to the cart, and purchase them.
+[![ChaosLab Test Suite](https://img.shields.io/badge/ChaosLab-Stage%2011%20Universal%20Generalization-blueviolet.svg)](#chaoslab-universal-resilience-platform)
+[![Quality Gate](https://img.shields.io/badge/Quality%20Gate-APPROVED-success.svg)](#automated-quality-gate)
+[![Continuous Integration](https://github.com/GoogleCloudPlatform/microservices-demo/workflows/Continuous%20Integration%20-%20Main/Release/badge.svg)](https://github.com/GoogleCloudPlatform/microservices-demo)
+
+Welcome to the unified repository housing both **Google's Online Boutique** and **ChaosLab**, an enterprise-grade automated chaos testing, recovery verification, and distributed resilience platform.
+
+---
+
+## ChaosLab Universal Resilience Platform
+
+**ChaosLab** is a decoupled, rule-based verification platform that proves microservice resilience in Kubernetes. Originally developed for Google's Online Boutique, ChaosLab has been universally generalized to test **arbitrary microservice applications** without rewriting code or creating service-specific Python verifiers.
+
+### Architectural Overview
+
+```
+                                      +---------------------------------------------+
+                                      |   Declarative YAML Experiment Configuration |
+                                      +---------------------------------------------+
+                                                             |
+                                                             v
++------------------------------------------------------------------------------------------------------------------------+
+|                                              CHAOSLAB UNIVERSAL ENGINE                                                 |
+|                                                                                                                        |
+|  +--------------------+     +---------------------+     +-----------------------+     +-----------------------------+  |
+|  | K8s Infra Verifier |     | Generic HTTP Prober |     |  Generic gRPC Prober  |     |   Distributed Telemetry     |  |
+|  | Pod / Node States  |     | Status / JSON Keys  |     | grpc.health.v1/Invoke |     |  OpenTelemetry / Jaeger     |  |
+|  +--------------------+     +---------------------+     +-----------------------+     +-----------------------------+  |
+|                                                            |                                                           |
+|                                                            v                                                           |
+|                                             +-------------------------------+                                          |
+|                                             |   Universal 11-Rule Oracle    |                                          |
+|                                             | PASS | FAIL | SKIP | NOT_APPL |                                          |
+|                                             +-------------------------------+                                          |
+|                                                            |                                                           |
+|                                                            v                                                           |
+|                                     +-----------------------------------------------+                                  |
+|                                     | Multi-Format Reporter (JSON, Markdown, HTML)  |                                  |
+|                                     +-----------------------------------------------+                                  |
++------------------------------------------------------------------------------------------------------------------------+
+                                                             |
+                 +-------------------------------------------+-------------------------------------------+
+                 |                                           |                                           |
+                 v                                           v                                           v
++---------------------------------+         +---------------------------------+         +---------------------------------+
+|     Google Online Boutique      |         |   Project Management Platform   |         |    Learning Management System   |
+|       (Namespace: default)      |         |  (Namespace: project-platform)  |         |  (Namespace: learning-platform) |
+|  - frontend       - checkout    |         |  - pulse-frontend (React UI)    |         |  - lms-frontend (React UI)      |
+|  - paymentservice - cartservice |         |  - user-service    (Port 8001)  |         |  - student-service  (Port 8011) |
+|  - 11 microservices (gRPC)      |         |  - project-service (Port 8002)  |         |  - course-service   (Port 8012) |
+|                                 |         |  - task-service    (Port 8003)  |         |  - enrollment-svc   (Port 8013) |
++---------------------------------+         +---------------------------------+         +---------------------------------+
+```
+
+### Supported Target Platforms
+
+ChaosLab simultaneously validates 3 independent application platforms in the cluster:
+
+1. **Google Online Boutique** (`default` namespace):
+   - 11 heterogeneous microservices (Go, C#, Node.js, Python, Java).
+   - High-throughput e-commerce flow with gRPC interfaces and mock payment processing.
+2. **Pulse Project Management Platform** (`project-platform` namespace):
+   - Production SaaS React frontend with live task kanban, project analytics, and team directory.
+   - Three FastAPI microservices (`user-service`, `project-service`, `task-service`).
+   - Inter-service REST communication with OpenTelemetry distributed trace context propagation.
+3. **EduStream Learning Management System** (`learning-platform` namespace):
+   - Interactive LMS React dashboard featuring course catalog, syllabus explorer, and enrollment tracking.
+   - Three FastAPI microservices (`student-service`, `course-service`, `enrollment-service`).
+   - Cross-service enrollment transactions with distributed telemetry exported to Jaeger.
+
+---
+
+### Quick Start & Verification CLI
+
+#### 1. List All Discovered Experiments across Applications
+```powershell
+python .\chaoslab\runner.py list
+```
+
+#### 2. Execute a Single Universal Experiment
+```powershell
+# Test Project Management Platform task service
+python .\chaoslab\runner.py run project-task-pod-kill
+
+# Test Learning Management System course service
+python .\chaoslab\runner.py run lms-course-pod-kill
+
+# Test Network Latency on Project Platform
+python .\chaoslab\runner.py run project-task-network-delay
+
+# Regression test on Online Boutique (100% backward compatible)
+python .\chaoslab\runner.py run checkout-service-pod-kill
+```
+
+#### 3. Run the Full Multi-Application Regression Suite
+```powershell
+python .\chaoslab\runner.py run-all
+```
+
+#### 4. Audit CI/CD Quality Gate
+```powershell
+python .\chaoslab\gate.py check
+```
+
+#### 5. Launch the Interactive Web Dashboard
+```powershell
+python .\chaoslab\runner.py dashboard --port 8080
+```
+Open [http://localhost:8080](http://localhost:8080) to access the multi-application topology grid, live execution stepper, and Oracle scorecard.
+
+---
+
+### Declarative Universal YAML Schema
+
+ChaosLab experiments are fully decoupled from code:
+
+```yaml
+name: project-task-pod-kill
+
+target:
+  namespace: project-platform
+  label:
+    app: task-service
+
+fault:
+  type: pod-kill
+  mode: one
+
+recovery:
+  timeout_seconds: 60
+  expected_ready_replicas: 1
+
+application:
+  enabled: true
+  health_probe:
+    type: http
+    port: 8003
+    path: /health
+    method: GET
+    expected_status: 200
+  functional_check:
+    enabled: true
+    type: http
+    port: 8003
+    path: /tasks/test
+    method: GET
+    expected_status: 200
+    expected_key: task_id
+  logs:
+    verify_logs: true
+    expected_log_pattern: "Uvicorn running"
+
+telemetry:
+  enabled: true
+  service_name: "task-service"
+  max_allowed_p95_ms: 1000
+```
+
+---
+
+## Original Online Boutique Documentation
 
 Google uses this application to demonstrate how developers can modernize enterprise applications using Google Cloud products, including: [Google Kubernetes Engine (GKE)](https://cloud.google.com/kubernetes-engine), [Cloud Service Mesh (CSM)](https://cloud.google.com/service-mesh), [gRPC](https://grpc.io/), [Cloud Operations](https://cloud.google.com/products/operations), [Spanner](https://cloud.google.com/spanner), [Memorystore](https://cloud.google.com/memorystore), [AlloyDB](https://cloud.google.com/alloydb), and [Gemini](https://ai.google.dev/). This application works on any Kubernetes cluster.
 

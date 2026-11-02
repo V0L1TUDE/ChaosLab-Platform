@@ -1,0 +1,102 @@
+name: "ChaosLab Resilience CI/CD & Quality Gate"
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'chaoslab/**'
+      - 'src/**'
+      - '.github/workflows/chaoslab-ci.yaml'
+  workflow_dispatch:
+    inputs:
+      fail_fast:
+        description: 'Abort suite immediately on first failure'
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # Run nightly at 02:00 UTC
+    - cron: '0 2 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chaoslab-resilience-gate:
+    name: "ChaosLab Regression Quality Gate"
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml requests
+
+      - name: Create Kubernetes KinD Cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: chaoslab-cluster
+          wait: 120s
+
+      - name: Verify Cluster Ready
+        run: |
+          kubectl cluster-info
+          kubectl get nodes -o wide
+
+      - name: Install Chaos Mesh
+        run: |
+          curl -sSL https://mirrors.chaos-mesh.org/v2.6.2/install.sh | bash -s -- --local kind
+          kubectl wait --for=condition=available --timeout=180s deployment --all -n chaos-mesh
+
+      - name: Deploy Online Boutique Microservices
+        run: |
+          kubectl apply -f ./release/kubernetes-manifests.yaml
+          kubectl wait --for=condition=available --timeout=300s deployment --all -n default
+
+      - name: Deploy Jaeger & Enable OpenTelemetry Tracing
+        run: |
+          kubectl apply -f ./chaoslab/k8s/jaeger.yaml
+          kubectl wait --for=condition=available --timeout=120s deployment/jaeger -n default
+          kubectl set env deployment/paymentservice ENABLE_TRACING="1" COLLECTOR_SERVICE_ADDR="opentelemetrycollector:4317" OTEL_SERVICE_NAME="paymentservice" -n default
+          kubectl set env deployment/checkoutservice ENABLE_TRACING="1" COLLECTOR_SERVICE_ADDR="opentelemetrycollector:4317" OTEL_SERVICE_NAME="checkoutservice" -n default
+          kubectl set env deployment/frontend ENABLE_TRACING="1" COLLECTOR_SERVICE_ADDR="opentelemetrycollector:4317" OTEL_SERVICE_NAME="frontend" -n default
+          kubectl rollout status deployment/paymentservice -n default --timeout=90s
+          kubectl rollout status deployment/checkoutservice -n default --timeout=90s
+          kubectl rollout status deployment/frontend -n default --timeout=90s
+
+      - name: Start Jaeger Port-Forward
+        run: |
+          kubectl port-forward svc/jaeger 16686:16686 -n default &
+          sleep 3
+          curl -s http://localhost:16686/api/services || echo "Jaeger ready"
+
+      - name: Execute ChaosLab Test Suite
+        run: |
+          python ./chaoslab/runner.py run-all --ci
+
+      - name: Evaluate Quality Gate Policy
+        run: |
+          python ./chaoslab/gate.py check --max-recovery-time 45 --max-p95 1000
+
+      - name: Upload Test Reports & Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaoslab-resilience-reports
+          path: |
+            chaoslab/reports/*.html
+            chaoslab/reports/*.md
+            chaoslab/reports/*.json
+          retention-days: 14

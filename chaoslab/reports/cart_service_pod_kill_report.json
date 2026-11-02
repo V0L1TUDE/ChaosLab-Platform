@@ -1,0 +1,330 @@
+{
+  "experiment": "cart-service-pod-kill",
+  "application_group": "Google Online Boutique",
+  "target": "cartservice",
+  "namespace": "default",
+  "fault": "pod-kill",
+  "baseline": {
+    "pod_name": "cartservice-9479b6c-pcljw",
+    "ready": "1/1",
+    "status": "Running",
+    "ready_replicas": 1,
+    "ip": "10.244.0.15",
+    "node": "desktop-control-plane"
+  },
+  "timestamps": {
+    "experiment_start": "2026-11-02T03:54:07.443595+00:00",
+    "fault_injected": "2026-11-02T03:54:07.925896+00:00",
+    "original_pod_disappeared": "2026-11-02T03:54:08.094952+00:00",
+    "replacement_ready": "2026-11-02T03:54:31.099896+00:00",
+    "experiment_end": "2026-11-02T03:54:33.693658+00:00"
+  },
+  "original_pod": "cartservice-9479b6c-pcljw",
+  "fault_injected": true,
+  "original_pod_disappeared": true,
+  "replacement_pod": "cartservice-9479b6c-zsr9w",
+  "replacement_ready": true,
+  "recovered_ready_replicas": 1,
+  "recovery_time_seconds": 23.0,
+  "total_recovery_seconds": 23.17,
+  "application": {
+    "enabled": true,
+    "probed_pod": "cartservice-9479b6c-zsr9w",
+    "probe_type": "grpc",
+    "health_check_passed": true,
+    "health_status": "SERVING",
+    "functional_test_passed": false,
+    "transaction_id": null,
+    "logs_verified": true,
+    "startup_log_detected": true,
+    "log_error_count": 0,
+    "health_details": {
+      "passed": true,
+      "health_status": "SERVING",
+      "details": "Kubelet Ready condition confirmed"
+    },
+    "functional_test_skipped": true,
+    "log_details": {
+      "logs_verified": true,
+      "startup_log_detected": true,
+      "log_error_count": 0,
+      "fatal_errors": [],
+      "details": "Startup pattern detected: True, fatal error count: 0"
+    }
+  },
+  "telemetry": {
+    "enabled": false
+  },
+  "chaos_mesh_evidence": {
+    "conditions": [
+      {
+        "status": "True",
+        "type": "Selected"
+      },
+      {
+        "status": "True",
+        "type": "AllInjected"
+      },
+      {
+        "status": "False",
+        "type": "AllRecovered"
+      },
+      {
+        "status": "False",
+        "type": "Paused"
+      }
+    ],
+    "container_records": [
+      {
+        "events": [
+          {
+            "operation": "Apply",
+            "timestamp": "2026-11-02T03:54:07Z",
+            "type": "Succeeded"
+          }
+        ],
+        "id": "default/cartservice-9479b6c-pcljw",
+        "injectedCount": 1,
+        "phase": "Injected",
+        "recoveredCount": 0,
+        "selectorKey": "."
+      }
+    ],
+    "injected": true,
+    "raw_status": {
+      "conditions": [
+        {
+          "status": "True",
+          "type": "Selected"
+        },
+        {
+          "status": "True",
+          "type": "AllInjected"
+        },
+        {
+          "status": "False",
+          "type": "AllRecovered"
+        },
+        {
+          "status": "False",
+          "type": "Paused"
+        }
+      ],
+      "experiment": {
+        "containerRecords": [
+          {
+            "events": [
+              {
+                "operation": "Apply",
+                "timestamp": "2026-11-02T03:54:07Z",
+                "type": "Succeeded"
+              }
+            ],
+            "id": "default/cartservice-9479b6c-pcljw",
+            "injectedCount": 1,
+            "phase": "Injected",
+            "recoveredCount": 0,
+            "selectorKey": "."
+          }
+        ],
+        "desiredPhase": "Run"
+      }
+    }
+  },
+  "kubernetes_events": [
+    {
+      "reason": "Killing",
+      "message": "Stopping container server",
+      "object": "pod/cartservice-9479b6c-pcljw",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:07Z"
+    },
+    {
+      "reason": "Scheduled",
+      "message": "Successfully assigned default/cartservice-9479b6c-zsr9w to desktop-control-plane",
+      "object": "pod/cartservice-9479b6c-zsr9w",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:08Z"
+    },
+    {
+      "reason": "Pulled",
+      "message": "Container image \"us-central1-docker.pkg.dev/online-boutique-ci/microservices-demo/cartservice:v0.10.6\" already present on machine and can be accessed by the pod",
+      "object": "pod/cartservice-9479b6c-zsr9w",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:08Z"
+    },
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/cartservice-9479b6c-zsr9w",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:08Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/cartservice-9479b6c-zsr9w",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:08Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Liveness probe failed: timeout: health rpc did not complete within 1s",
+      "object": "pod/cartservice-9479b6c-zsr9w",
+      "type": "Warning",
+      "timestamp": "2026-11-02T03:54:29Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: cartservice-9479b6c-zsr9w",
+      "object": "replicaset/cartservice-9479b6c",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:07Z"
+    }
+  ],
+  "config": {
+    "name": "cart-service-pod-kill",
+    "target": {
+      "namespace": "default",
+      "label": {
+        "app": "cartservice"
+      }
+    },
+    "fault": {
+      "type": "pod-kill",
+      "mode": "one"
+    },
+    "recovery": {
+      "timeout_seconds": 60,
+      "expected_ready_replicas": 1
+    },
+    "verification": {
+      "expected_ready_replicas": 1,
+      "application": {
+        "enabled": true,
+        "grpc_health_check": true,
+        "expected_health_status": "SERVING",
+        "functional_test": false,
+        "verify_logs": true,
+        "expected_log_pattern": "Application started"
+      },
+      "telemetry": {
+        "enabled": false
+      }
+    },
+    "application": {
+      "enabled": true,
+      "grpc_health_check": true,
+      "expected_health_status": "SERVING",
+      "functional_test": false,
+      "verify_logs": true,
+      "expected_log_pattern": "Application started"
+    },
+    "telemetry": {
+      "enabled": false
+    }
+  },
+  "verdict": "PASS",
+  "failure_reason": null,
+  "oracle_evaluation": {
+    "verdict": "PASS",
+    "total_rules": 11,
+    "applicable_rules": 7,
+    "executed_rules": 7,
+    "passed_rules": 7,
+    "failed_rules": 0,
+    "skipped_rules": 4,
+    "all_rules_passed": true,
+    "failure_reasons": [],
+    "rule_evaluations": [
+      {
+        "rule": "baseline_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target met baseline readiness (1 ready, expected >= 1).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "fault_injected",
+        "passed": true,
+        "status": "PASS",
+        "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+        "observed": "Injected",
+        "expected": "Injected"
+      },
+      {
+        "rule": "target_impact",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target pod disappearance confirmed (cartservice-9479b6c-pcljw).",
+        "observed": true,
+        "expected": true
+      },
+      {
+        "rule": "service_recovery",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered 1 ready replica(s) (replacement: cartservice-9479b6c-zsr9w).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "recovery_within_timeout",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered in 23.00s (within limit of 60.0s).",
+        "observed": "23.00s",
+        "expected": "<=60.0s"
+      },
+      {
+        "rule": "app_health_probe",
+        "passed": true,
+        "status": "PASS",
+        "message": "Application health probe (GRPC) verified: status SERVING.",
+        "observed": "SERVING",
+        "expected": "SERVING/200 OK"
+      },
+      {
+        "rule": "app_functional_check",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Functional transaction test not configured for this experiment.",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "app_logs_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Container logs confirmed clean startup (found 'Application started', 0 fatal errors).",
+        "observed": "startup=True, errors=0",
+        "expected": "startup=True, errors=0"
+      },
+      {
+        "rule": "telemetry_traces_recorded",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Distributed tracing verification skipped (not enabled in config).",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "telemetry_error_spike_detected",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Error spike verification skipped (optional check not required in config).",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "telemetry_latency_recovered",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Latency SLA verification skipped (not enabled in config).",
+        "observed": "N/A",
+        "expected": "N/A"
+      }
+    ]
+  }
+}

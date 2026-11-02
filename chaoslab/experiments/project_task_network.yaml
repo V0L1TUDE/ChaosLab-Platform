@@ -1,0 +1,39 @@
+name: project-task-network-delay
+
+target:
+  namespace: project-platform
+  label:
+    app: task-service
+
+fault:
+  type: network-delay
+  mode: one
+  latency: "200ms"
+  jitter: "10ms"
+  duration: "15s"
+
+recovery:
+  timeout_seconds: 60
+  expected_ready_replicas: 1
+
+application:
+  enabled: true
+  health_probe:
+    type: http
+    port: 8003
+    path: /health
+    method: GET
+    expected_status: 200
+  functional_check:
+    enabled: true
+    type: http
+    port: 8003
+    path: /tasks/test
+    method: GET
+    expected_status: 200
+    expected_key: task_id
+
+telemetry:
+  enabled: true
+  service_name: "task-service"
+  max_allowed_p95_ms: 1500

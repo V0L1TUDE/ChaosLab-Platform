@@ -1,0 +1,39 @@
+name: lms-enrollment-pod-kill
+
+target:
+  namespace: learning-platform
+  label:
+    app: enrollment-service
+
+fault:
+  type: pod-kill
+  mode: one
+
+recovery:
+  timeout_seconds: 60
+  expected_ready_replicas: 1
+
+application:
+  enabled: true
+  health_probe:
+    type: http
+    port: 8013
+    path: /health
+    method: GET
+    expected_status: 200
+  functional_check:
+    enabled: true
+    type: http
+    port: 8013
+    path: /enrollments/test
+    method: GET
+    expected_status: 200
+    expected_key: enrollment_id
+  logs:
+    verify_logs: true
+    expected_log_pattern: "Uvicorn running"
+
+telemetry:
+  enabled: true
+  service_name: "enrollment-service"
+  max_allowed_p95_ms: 1000

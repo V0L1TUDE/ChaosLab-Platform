@@ -1,0 +1,246 @@
+{
+  "experiment": "payment-service-pod-kill",
+  "target": "paymentservice",
+  "namespace": "default",
+  "fault": "pod-kill",
+  "baseline": {
+    "pod_name": "paymentservice-5df7f57d78-w2lmm",
+    "ready": "1/1",
+    "status": "Running",
+    "ready_replicas": 1,
+    "ip": "10.244.0.25",
+    "node": "desktop-control-plane"
+  },
+  "timestamps": {
+    "experiment_start": "2026-10-13T12:12:44.997807+00:00",
+    "fault_injected": "2026-10-13T12:12:46.603248+00:00",
+    "original_pod_disappeared": "2026-10-13T12:12:46.753883+00:00",
+    "replacement_ready": "2026-10-13T12:12:58.999746+00:00",
+    "experiment_end": "2026-10-13T12:13:05.629989+00:00"
+  },
+  "original_pod": "paymentservice-5df7f57d78-w2lmm",
+  "fault_injected": true,
+  "original_pod_disappeared": true,
+  "replacement_pod": "paymentservice-5df7f57d78-4ln24",
+  "replacement_ready": true,
+  "recovered_ready_replicas": 1,
+  "recovery_time_seconds": 12.25,
+  "total_recovery_seconds": 12.4,
+  "application": {
+    "enabled": true,
+    "probed_pod": "paymentservice-5df7f57d78-4ln24",
+    "health_check_passed": true,
+    "health_status": "SERVING",
+    "functional_test_passed": true,
+    "transaction_id": "39c0e318-b33d-4529-b9a5-e822559aea58",
+    "logs_verified": true,
+    "startup_log_detected": true,
+    "log_error_count": 0
+  },
+  "chaos_mesh_evidence": {
+    "available": true,
+    "resource_name": "chaoslab-payment-service-pod-kill",
+    "desired_phase": "Run",
+    "conditions": [
+      {
+        "type": "AllInjected",
+        "status": "True"
+      },
+      {
+        "type": "AllRecovered",
+        "status": "False"
+      },
+      {
+        "type": "Paused",
+        "status": "False"
+      },
+      {
+        "type": "Selected",
+        "status": "True"
+      }
+    ],
+    "container_records": [
+      {
+        "events": [
+          {
+            "operation": "Apply",
+            "timestamp": "2026-10-13T12:12:46Z",
+            "type": "Succeeded"
+          }
+        ],
+        "id": "default/paymentservice-5df7f57d78-w2lmm",
+        "injectedCount": 1,
+        "phase": "Injected",
+        "recoveredCount": 0,
+        "selectorKey": "."
+      }
+    ]
+  },
+  "kubernetes_events": [
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/paymentservice-5df7f57d78-w2lmm",
+      "type": "Normal",
+      "timestamp": "2026-10-13T11:55:40Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/paymentservice-5df7f57d78-w2lmm",
+      "type": "Normal",
+      "timestamp": "2026-10-13T11:55:40Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: timeout: failed to connect service \"10.244.0.25:50051\" within 1s: context deadline exceeded",
+      "object": "pod/paymentservice-5df7f57d78-w2lmm",
+      "type": "Warning",
+      "timestamp": "2026-10-13T11:55:42Z"
+    },
+    {
+      "reason": "Scheduled",
+      "message": "Successfully assigned default/paymentservice-5df7f57d78-4ln24 to desktop-control-plane",
+      "object": "pod/paymentservice-5df7f57d78-4ln24",
+      "type": "Normal",
+      "timestamp": "2026-10-13T12:12:46.698592Z"
+    },
+    {
+      "reason": "Killing",
+      "message": "Stopping container server",
+      "object": "pod/paymentservice-5df7f57d78-w2lmm",
+      "type": "Normal",
+      "timestamp": "2026-10-13T12:12:46Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: paymentservice-5df7f57d78-4ln24",
+      "object": "replicaset/paymentservice-5df7f57d78",
+      "type": "Normal",
+      "timestamp": "2026-10-13T12:12:46Z"
+    },
+    {
+      "reason": "Pulled",
+      "message": "Container image \"us-central1-docker.pkg.dev/online-boutique-ci/microservices-demo/paymentservice:v0.10.6\" already present on machine and can be accessed by the pod",
+      "object": "pod/paymentservice-5df7f57d78-4ln24",
+      "type": "Normal",
+      "timestamp": "2026-10-13T12:12:47Z"
+    },
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/paymentservice-5df7f57d78-4ln24",
+      "type": "Normal",
+      "timestamp": "2026-10-13T12:12:47Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/paymentservice-5df7f57d78-4ln24",
+      "type": "Normal",
+      "timestamp": "2026-10-13T12:12:47Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: timeout: failed to connect service \"10.244.0.26:50051\" within 1s: context deadline exceeded",
+      "object": "pod/paymentservice-5df7f57d78-4ln24",
+      "type": "Warning",
+      "timestamp": "2026-10-13T12:12:49Z"
+    }
+  ],
+  "config": {
+    "name": "payment-service-pod-kill",
+    "target": {
+      "namespace": "default",
+      "label": {
+        "app": "paymentservice"
+      }
+    },
+    "fault": {
+      "type": "pod-kill",
+      "mode": "one"
+    },
+    "recovery": {
+      "timeout_seconds": 60
+    },
+    "verification": {
+      "expected_ready_replicas": 1,
+      "application": {
+        "enabled": true,
+        "grpc_health_check": true,
+        "expected_health_status": "SERVING",
+        "functional_test": true,
+        "verify_logs": true,
+        "expected_log_pattern": "PaymentService gRPC server started"
+      }
+    }
+  },
+  "verdict": "PASS",
+  "failure_reason": null,
+  "oracle_evaluation": {
+    "verdict": "PASS",
+    "total_rules": 8,
+    "passed_rules": 8,
+    "failed_rules": 0,
+    "all_rules_passed": true,
+    "failure_reasons": [],
+    "rule_evaluations": [
+      {
+        "rule": "baseline_healthy",
+        "passed": true,
+        "message": "Target met baseline readiness (1 ready, expected >= 1).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "fault_injected",
+        "passed": true,
+        "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+        "observed": "Injected",
+        "expected": "Injected"
+      },
+      {
+        "rule": "target_impact",
+        "passed": true,
+        "message": "Target pod disappearance confirmed (paymentservice-5df7f57d78-w2lmm).",
+        "observed": true,
+        "expected": true
+      },
+      {
+        "rule": "service_recovery",
+        "passed": true,
+        "message": "Service recovered 1 ready replica(s) (replacement: paymentservice-5df7f57d78-4ln24).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "recovery_within_timeout",
+        "passed": true,
+        "message": "Service recovered in 12.25s (within limit of 60.0s).",
+        "observed": 12.25,
+        "expected": "<=60.0s"
+      },
+      {
+        "rule": "app_health_probe",
+        "passed": true,
+        "message": "Application gRPC health probe verified (status: SERVING).",
+        "observed": "SERVING",
+        "expected": "SERVING"
+      },
+      {
+        "rule": "app_functional_check",
+        "passed": true,
+        "message": "Functional charge RPC processed successfully (transaction ID: 39c0e318-b33d-4529-b9a5-e822559aea58).",
+        "observed": "39c0e318-b33d-4529-b9a5-e822559aea58",
+        "expected": "valid_uuid"
+      },
+      {
+        "rule": "app_logs_healthy",
+        "passed": true,
+        "message": "Container logs confirmed clean startup (found 'PaymentService gRPC server started', 0 fatal errors).",
+        "observed": "startup=True, errors=0",
+        "expected": "startup=True, errors=0"
+      }
+    ]
+  }
+}

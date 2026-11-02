@@ -1,0 +1,247 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: project-platform
+  labels:
+    app: user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+      - name: user-service
+        image: pulse-user-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8001
+        env:
+        - name: COLLECTOR_ADDR
+          value: "opentelemetrycollector.default.svc.cluster.local:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "user-service"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 300m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: project-platform
+  labels:
+    app: user-service
+spec:
+  type: ClusterIP
+  selector:
+    app: user-service
+  ports:
+  - port: 8001
+    targetPort: 8001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: project-service
+  namespace: project-platform
+  labels:
+    app: project-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: project-service
+  template:
+    metadata:
+      labels:
+        app: project-service
+    spec:
+      containers:
+      - name: project-service
+        image: pulse-project-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8002
+        env:
+        - name: USER_SERVICE_URL
+          value: "http://user-service:8001"
+        - name: COLLECTOR_ADDR
+          value: "opentelemetrycollector.default.svc.cluster.local:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "project-service"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 300m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: project-service
+  namespace: project-platform
+  labels:
+    app: project-service
+spec:
+  type: ClusterIP
+  selector:
+    app: project-service
+  ports:
+  - port: 8002
+    targetPort: 8002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-service
+  namespace: project-platform
+  labels:
+    app: task-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: task-service
+  template:
+    metadata:
+      labels:
+        app: task-service
+    spec:
+      containers:
+      - name: task-service
+        image: pulse-task-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8003
+        env:
+        - name: PROJECT_SERVICE_URL
+          value: "http://project-service:8002"
+        - name: USER_SERVICE_URL
+          value: "http://user-service:8001"
+        - name: COLLECTOR_ADDR
+          value: "opentelemetrycollector.default.svc.cluster.local:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "task-service"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8003
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8003
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 300m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-service
+  namespace: project-platform
+  labels:
+    app: task-service
+spec:
+  type: ClusterIP
+  selector:
+    app: task-service
+  ports:
+  - port: 8003
+    targetPort: 8003
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pm-frontend
+  namespace: project-platform
+  labels:
+    app: pm-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pm-frontend
+  template:
+    metadata:
+      labels:
+        app: pm-frontend
+    spec:
+      containers:
+      - name: pm-frontend
+        image: pulse-frontend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 20m
+            memory: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pm-frontend
+  namespace: project-platform
+  labels:
+    app: pm-frontend
+spec:
+  type: NodePort
+  selector:
+    app: pm-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30080

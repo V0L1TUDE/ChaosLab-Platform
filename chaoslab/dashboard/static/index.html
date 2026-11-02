@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChaosLab &bull; Resilience Control Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #0b0f19;
+            --bg-surface: #111827;
+            --bg-card: #162032;
+            --bg-elevated: #1e293b;
+            --border: #26334d;
+            --border-highlight: #3b82f6;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-faint: #64748b;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --primary-glow: rgba(59, 130, 246, 0.25);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.2);
+            --danger: #ef4444;
+            --danger-glow: rgba(239, 68, 68, 0.2);
+            --warning: #f59e0b;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            line-height: 1.5;
+            padding-bottom: 60px;
+        }
+
+        code, pre, .mono {
+            font-family: 'JetBrains Mono', Consolas, monospace;
+        }
+
+        /* Top Navigation Header */
+        header {
+            background: rgba(17, 24, 39, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            padding: 14px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            width: 38px;
+            height: 38px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.35);
+        }
+
+        .brand h1 {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .brand span.tag {
+            font-size: 11px;
+            font-weight: 700;
+            background: var(--primary-glow);
+            color: var(--primary);
+            padding: 2px 8px;
+            border-radius: 9999px;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            text-transform: uppercase;
+        }
+
+        .nav-status {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 9999px;
+            font-size: 13px;
+            font-weight: 600;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-faint);
+        }
+
+        .dot.pulse-green {
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        .dot.pulse-red {
+            background: var(--danger);
+            box-shadow: 0 0 10px var(--danger);
+        }
+
+        .btn-link {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 6px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .btn-link:hover {
+            color: var(--text-main);
+            border-color: var(--primary);
+            background: var(--bg-elevated);
+        }
+
+        /* Container Layout */
+        .container {
+            max-width: 1360px;
+            margin: 24px auto;
+            padding: 0 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+        }
+
+        /* Cards & Section Styling */
+        .card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-title {
+            font-size: 17px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-title span.badge {
+            font-size: 12px;
+            padding: 2px 10px;
+            border-radius: 9999px;
+            font-weight: 600;
+            background: var(--bg-elevated);
+            color: var(--text-muted);
+        }
+
+        /* Microservices Topology Grid */
+        .topology-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .service-node {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .service-node:hover {
+            border-color: var(--border-highlight);
+            transform: translateY(-2px);
+        }
+
+        .service-node.active-target {
+            border-color: #f59e0b;
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.2);
+        }
+
+        .service-node-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .service-name {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .service-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .service-meta span.ready {
+            font-weight: 600;
+            color: var(--success);
+        }
+
+        .service-meta span.not-ready {
+            font-weight: 600;
+            color: var(--danger);
+        }
+
+        /* Control Center Grid: Launchpad + Monitor */
+        .control-grid {
+            display: grid;
+            grid-template-columns: 420px 1fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 1024px) {
+            .control-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Experiment Launcher Form */
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .select-input {
+            width: 100%;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 12px 16px;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+            cursor: pointer;
+        }
+
+        .select-input:focus {
+            border-color: var(--primary);
+        }
+
+        .config-preview-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+
+        .config-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .config-row:last-child {
+            border-bottom: none;
+        }
+
+        .config-key {
+            color: var(--text-muted);
+        }
+
+        .config-val {
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .btn-primary {
+            width: 100%;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #ffffff;
+            border: none;
+            padding: 14px 24px;
+            border-radius: var(--radius-md);
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 15px var(--primary-glow);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Live Stepper & Progress Monitor */
+        .stepper {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .step-node {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 10px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .step-node.completed {
+            border-color: var(--success);
+            background: rgba(16, 185, 129, 0.08);
+        }
+
+        .step-node.active {
+            border-color: var(--primary);
+            background: var(--primary-glow);
+            animation: pulseBorder 1.5s infinite;
+        }
+
+        .step-node.failed {
+            border-color: var(--danger);
+            background: var(--danger-glow);
+        }
+
+        .step-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .step-node.completed .step-title {
+            color: var(--success);
+        }
+
+        .step-node.active .step-title {
+            color: var(--primary);
+        }
+
+        .step-node.failed .step-title {
+            color: var(--danger);
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 8px;
+            background: var(--bg-card);
+            border-radius: 9999px;
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #10b981);
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+
+        .terminal-box {
+            background: #060a12;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            height: 220px;
+            overflow-y: auto;
+            font-size: 12px;
+            line-height: 1.6;
+            color: #38bdf8;
+            box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5);
+        }
+
+        .log-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .log-line.error {
+            color: var(--danger);
+        }
+
+        .log-line.success {
+            color: var(--success);
+        }
+
+        /* Invariant Oracle Scorecard Table */
+        .scorecard-banner {
+            padding: 16px 20px;
+            border-radius: var(--radius-md);
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .scorecard-banner.pass {
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid var(--success);
+        }
+
+        .scorecard-banner.fail {
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid var(--danger);
+        }
+
+        .scorecard-banner.idle {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+        }
+
+        .banner-verdict {
+            font-size: 20px;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .banner-verdict.pass { color: var(--success); }
+        .banner-verdict.fail { color: var(--danger); }
+        .banner-verdict.idle { color: var(--text-muted); }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--bg-card);
+            color: var(--text-muted);
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .badge-pill {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 9999px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .badge-pill.pass {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-pill.fail {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        /* Metric Highlights Grid */
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+
+        .metric-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 16px;
+        }
+
+        .metric-card h4 {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .metric-card .value {
+            font-size: 22px;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+
+        .metric-card .subtext {
+            font-size: 11px;
+            color: var(--text-faint);
+            margin-top: 4px;
+        }
+
+        /* Quality Gate & Reports Two-Column Grid */
+        .bottom-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 900px) {
+            .bottom-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .policy-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .policy-name {
+            font-weight: 700;
+            font-size: 13px;
+        }
+
+        .policy-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .report-link {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 12px;
+            margin-right: 8px;
+        }
+
+        .report-link:hover {
+            text-decoration: underline;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.15); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        @keyframes pulseBorder {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+            70% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Header -->
+    <header>
+        <div class="brand">
+            <div class="brand-icon">⚡</div>
+            <div>
+                <h1>ChaosLab <span class="tag">Control Center</span></h1>
+            </div>
+        </div>
+        <div class="nav-status">
+            <div class="status-pill" id="clusterStatusPill">
+                <span class="dot pulse-green" id="clusterDot"></span>
+                <span id="clusterStatusText">Connecting to Cluster...</span>
+            </div>
+            <div class="status-pill" id="gateStatusPill">
+                <span id="gatePillText">Quality Gate: Checking...</span>
+            </div>
+            <a href="http://localhost:16686" target="_blank" class="btn-link">
+                🔍 Jaeger Traces
+            </a>
+            <button onclick="fetchInitialData()" class="btn-link" style="cursor: pointer;">
+                🔄 Refresh
+            </button>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- 1. Microservices Topology Grid -->
+        <section class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span>☸ Multi-Application Microservice Topology</span>
+                    <span class="badge" id="serviceCountBadge">0 Services</span>
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">
+                    <span>Platform:</span>
+                    <select id="namespaceFilter" onchange="fetchClusterStatus()" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 8px; font-size: 11px; font-family: 'JetBrains Mono', monospace;">
+                        <option value="all">All Platforms (Universal Suite)</option>
+                        <option value="default">Online Boutique (default)</option>
+                        <option value="project-platform">Project Platform (project-platform)</option>
+                        <option value="learning-platform">LMS Platform (learning-platform)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="topology-grid" id="topologyGrid">
+                <!-- Dynamically populated -->
+                <div style="color: var(--text-muted); font-size: 13px;">Scanning microservice pods...</div>
+            </div>
+        </section>
+
+        <!-- 2. Control Grid: Launchpad + Live Monitor -->
+        <div class="control-grid">
+            <!-- Left: Experiment Studio / Launchpad -->
+            <section class="card">
+                <div class="card-header">
+                    <div class="card-title">🎯 Chaos Studio</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Select Resilience Experiment</label>
+                    <select id="experimentSelect" class="select-input" onchange="updateSelectedPreview()">
+                        <!-- Dynamically populated -->
+                    </select>
+                </div>
+
+                <div class="config-preview-box">
+                    <div class="config-row">
+                        <span class="config-key">Target Service</span>
+                        <span class="config-val" id="prevTarget">--</span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-key">Fault Injected</span>
+                        <span class="config-val" id="prevFault">--</span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-key">Recovery SLA Threshold</span>
+                        <span class="config-val" id="prevTimeout">--</span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-key">Application Probe</span>
+                        <span class="config-val" id="prevApp">--</span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-key">Distributed Tracing</span>
+                        <span class="config-val" id="prevTelemetry">--</span>
+                    </div>
+                </div>
+
+                <button id="runBtn" class="btn-primary" onclick="triggerExperiment()">
+                    <span>⚡ Inject Chaos & Verify</span>
+                </button>
+            </section>
+
+            <!-- Right: Live Execution Stepper & Terminal -->
+            <section class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span>📡 Live Verification Monitor</span>
+                        <span class="badge" id="execStatusBadge">IDLE</span>
+                    </div>
+                    <div style="font-size: 13px; font-weight: 600;" id="execPercentText">0%</div>
+                </div>
+
+                <!-- 6 Phase Stepper -->
+                <div class="stepper">
+                    <div class="step-node" id="step-baseline">
+                        <div class="step-title">1. Baseline</div>
+                    </div>
+                    <div class="step-node" id="step-injecting">
+                        <div class="step-title">2. Injected</div>
+                    </div>
+                    <div class="step-node" id="step-waiting_impact">
+                        <div class="step-title">3. Impact</div>
+                    </div>
+                    <div class="step-node" id="step-waiting_recovery">
+                        <div class="step-title">4. Recovery</div>
+                    </div>
+                    <div class="step-node" id="step-probing_app">
+                        <div class="step-title">5. App Probe</div>
+                    </div>
+                    <div class="step-node" id="step-completed">
+                        <div class="step-title">6. Oracle</div>
+                    </div>
+                </div>
+
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--text-main);" id="execMessageText">
+                    System ready. Select an experiment to begin.
+                </div>
+
+                <div class="terminal-box" id="terminalBox">
+                    <div class="log-line">[00:00:00] ChaosLab control plane ready. Waiting for run trigger...</div>
+                </div>
+            </section>
+        </div>
+
+        <!-- 3. Verification Oracle Scorecard -->
+        <section class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span>⚖ Verification Oracle Invariant Evaluation</span>
+                    <span class="badge" id="oracleRulesBadge">11 Rules</span>
+                </div>
+            </div>
+
+            <div class="scorecard-banner idle" id="scorecardBanner">
+                <div class="banner-verdict idle" id="scorecardVerdictText">
+                    <span>Awaiting Experiment Execution</span>
+                </div>
+                <div style="font-size: 13px; color: var(--text-muted);" id="scorecardSubtext">
+                    Trigger an experiment to evaluate all 11 declarative invariants.
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 25%;">Invariant Rule</th>
+                        <th style="width: 12%;">Status</th>
+                        <th style="width: 15%;">Observed</th>
+                        <th style="width: 15%;">Expected</th>
+                        <th>Verification Details</th>
+                    </tr>
+                </thead>
+                <tbody id="oracleTableBody">
+                    <tr>
+                        <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                            No evaluation data yet. Run an experiment above to view invariant outcomes.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- 4. Distributed Tracing & Telemetry Panel -->
+        <section class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span>📈 Distributed Tracing & Latency Telemetry (OpenTelemetry)</span>
+                    <span class="badge" id="telemetryServiceBadge">Jaeger Receiver</span>
+                </div>
+            </div>
+
+            <div class="metric-grid">
+                <div class="metric-card">
+                    <h4>Traces Captured</h4>
+                    <div class="value" id="telTracesCount">0</div>
+                    <div class="subtext" id="telSpansCount">0 spans recorded</div>
+                </div>
+                <div class="metric-card">
+                    <h4>Error Spans</h4>
+                    <div class="value" id="telErrorsCount">0</div>
+                    <div class="subtext" id="telErrorRate">0.0% error rate</div>
+                </div>
+                <div class="metric-card">
+                    <h4>p50 Latency</h4>
+                    <div class="value" id="telP50">0.0ms</div>
+                    <div class="subtext">Median steady-state</div>
+                </div>
+                <div class="metric-card">
+                    <h4>p95 Latency (SLA)</h4>
+                    <div class="value" id="telP95">0.0ms</div>
+                    <div class="subtext">Threshold: &le; 1000ms</div>
+                </div>
+            </div>
+
+            <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 18px; font-size: 13px; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <span style="color: var(--text-muted);">Sample Trace ID:</span>
+                    <code id="telTraceId" style="color: #38bdf8; margin-left: 8px;">N/A</code>
+                </div>
+                <div id="telTraceLink">
+                    <span style="color: var(--text-faint); font-size: 12px;">Trace link active after run</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- 5. Quality Gate & Historical Reports Grid -->
+        <div class="bottom-grid">
+            <!-- Left: CI/CD Quality Gate Policies -->
+            <section class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span>🛡 Regression Quality Gate Policies</span>
+                        <span class="badge" id="gateVerdictBadge">Checking...</span>
+                    </div>
+                </div>
+                <div id="qualityGatePolicies">
+                    <!-- Dynamically populated -->
+                </div>
+            </section>
+
+            <!-- Right: Historical Reports List -->
+            <section class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span>📁 Historical Experiment Reports</span>
+                        <span class="badge" id="reportCountBadge">0 Reports</span>
+                    </div>
+                </div>
+                <div style="max-height: 320px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Experiment</th>
+                                <th>Verdict</th>
+                                <th>Recovery</th>
+                                <th>Formats</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reportsTableBody">
+                            <tr>
+                                <td colspan="4" style="text-align: center; color: var(--text-muted);">Loading reports...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- JavaScript Controller -->
+    <script>
+        let experimentsList = [];
+        let isRunning = false;
+        let activeExecutionExperiment = null;
+
+        async function fetchInitialData() {
+            await Promise.all([
+                fetchClusterStatus(),
+                fetchExperiments(),
+                fetchExecutionState(),
+                fetchQualityGate(),
+                fetchReports()
+            ]);
+        }
+
+        // 1. Fetch Kubernetes Cluster Pod Status
+        async function fetchClusterStatus() {
+            try {
+                const nsFilter = document.getElementById('namespaceFilter') ? document.getElementById('namespaceFilter').value : 'all';
+                const res = await fetch(`/api/status?namespace=${encodeURIComponent(nsFilter)}`);
+                const data = await res.json();
+                const grid = document.getElementById('topologyGrid');
+                const pillText = document.getElementById('clusterStatusText');
+                const dot = document.getElementById('clusterDot');
+                const countBadge = document.getElementById('serviceCountBadge');
+
+                if (!data.connected) {
+                    pillText.innerText = "Cluster Disconnected";
+                    dot.className = "dot pulse-red";
+                    grid.innerHTML = `<div style="color:var(--danger);">Error: ${data.error || 'Cannot reach cluster'}</div>`;
+                    return;
+                }
+
+                pillText.innerText = `Cluster: ${data.ready_pods}/${data.total_pods} Ready`;
+                dot.className = data.all_healthy ? "dot pulse-green" : "dot pulse-red";
+                countBadge.innerText = `${data.total_pods} Services`;
+
+                grid.innerHTML = data.pods.map(pod => `
+                    <div class="service-node ${activeExecutionExperiment && activeExecutionExperiment.includes(pod.app) ? 'active-target' : ''}">
+                        <div class="service-node-header">
+                            <span class="service-name">${pod.app}</span>
+                            <span class="dot ${pod.is_ready ? 'pulse-green' : 'pulse-red'}"></span>
+                        </div>
+                        <div class="service-meta">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                                <span class="badge" style="font-size:9px; padding:1px 6px; background:rgba(59,130,246,0.15); color:var(--primary); font-weight:600;">${pod.app_group || pod.namespace}</span>
+                                <code style="font-size:10px;">${pod.ready}</code>
+                            </div>
+                            <div>Pod: <code style="font-size:10px;">${pod.name.split('-').slice(1).join('-')}</code></div>
+                            <div>Status: <span class="${pod.is_ready ? 'ready' : 'not-ready'}">${pod.status}</span> &bull; ${pod.ip || 'No IP'}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error("fetchClusterStatus error:", err);
+            }
+        }
+
+        // 2. Fetch Discovered Experiments
+        async function fetchExperiments() {
+            try {
+                const res = await fetch('/api/experiments');
+                const data = await res.json();
+                experimentsList = data.experiments || [];
+
+                const select = document.getElementById('experimentSelect');
+                const currentVal = select.value;
+
+                // Group by app_group
+                const groups = {};
+                experimentsList.forEach(exp => {
+                    const grp = exp.app_group || "General";
+                    if (!groups[grp]) groups[grp] = [];
+                    groups[grp].push(exp);
+                });
+
+                select.innerHTML = Object.keys(groups).map(grp => `
+                    <optgroup label="${grp}">
+                        ${groups[grp].map(exp => `
+                            <option value="${exp.name}">${exp.name} (${exp.target})</option>
+                        `).join('')}
+                    </optgroup>
+                `).join('');
+
+                if (currentVal && experimentsList.some(e => e.name === currentVal)) {
+                    select.value = currentVal;
+                }
+                updateSelectedPreview();
+            } catch (err) {
+                console.error("fetchExperiments error:", err);
+            }
+        }
+
+        function updateSelectedPreview() {
+            const select = document.getElementById('experimentSelect');
+            const exp = experimentsList.find(e => e.name === select.value);
+            if (!exp) return;
+
+            document.getElementById('prevTarget').innerText = `${exp.target} (${exp.namespace})`;
+            document.getElementById('prevFault').innerText = exp.fault;
+            document.getElementById('prevTimeout').innerText = `${exp.timeout}s`;
+            document.getElementById('prevApp').innerText = exp.app_check;
+            document.getElementById('prevTelemetry').innerText = exp.telemetry;
+        }
+
+        // 3. Trigger Experiment Run
+        async function triggerExperiment() {
+            const select = document.getElementById('experimentSelect');
+            const expName = select.value;
+            if (!expName) return;
+
+            const runBtn = document.getElementById('runBtn');
+            runBtn.disabled = true;
+            runBtn.innerHTML = `<span>⏳ Initializing...</span>`;
+
+            try {
+                const res = await fetch('/api/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: expName })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    alert(data.error || "Failed to start experiment");
+                    runBtn.disabled = false;
+                    runBtn.innerHTML = `<span>⚡ Inject Chaos & Verify</span>`;
+                }
+            } catch (err) {
+                alert("Network error starting experiment: " + err);
+                runBtn.disabled = false;
+                runBtn.innerHTML = `<span>⚡ Inject Chaos & Verify</span>`;
+            }
+        }
+
+        // 4. Poll Live Execution State
+        async function fetchExecutionState() {
+            try {
+                const res = await fetch('/api/execution');
+                const data = await res.json();
+                isRunning = data.running;
+                activeExecutionExperiment = isRunning ? data.experiment : null;
+
+                const runBtn = document.getElementById('runBtn');
+                const statusBadge = document.getElementById('execStatusBadge');
+                const percentText = document.getElementById('execPercentText');
+                const messageText = document.getElementById('execMessageText');
+                const progressBar = document.getElementById('progressBar');
+                const terminal = document.getElementById('terminalBox');
+
+                if (isRunning) {
+                    runBtn.disabled = true;
+                    runBtn.innerHTML = `<span>⚡ Running: ${data.experiment}...</span>`;
+                    statusBadge.innerText = data.phase.toUpperCase();
+                    statusBadge.style.color = "var(--primary)";
+                } else {
+                    runBtn.disabled = false;
+                    runBtn.innerHTML = `<span>⚡ Inject Chaos & Verify</span>`;
+                    statusBadge.innerText = (data.verdict || "IDLE");
+                    statusBadge.style.color = (data.verdict === "PASS" ? "var(--success)" : (data.verdict === "FAIL" ? "var(--danger)" : "var(--text-muted)"));
+                }
+
+                percentText.innerText = `${data.percent}%`;
+                progressBar.style.width = `${data.percent}%`;
+                messageText.innerText = data.message;
+
+                // Update Stepper Nodes
+                updateStepper(data.phase, data.verdict);
+
+                // Update Terminal Output
+                if (data.logs && data.logs.length > 0) {
+                    terminal.innerHTML = data.logs.map(log => {
+                        let cls = "";
+                        if (log.includes("PASS") || log.includes("Verified") || log.includes("Ready")) cls = "success";
+                        if (log.includes("FAIL") || log.includes("ERROR") || log.includes("Failed")) cls = "error";
+                        return `<div class="log-line ${cls}">${escapeHtml(log)}</div>`;
+                    }).join('');
+                    terminal.scrollTop = terminal.scrollHeight;
+                }
+
+                // If completed report available, update scorecard & telemetry
+                if (data.report) {
+                    renderOracleScorecard(data.report);
+                    renderTelemetry(data.report.telemetry);
+                }
+            } catch (err) {
+                console.error("fetchExecutionState error:", err);
+            }
+        }
+
+        function updateStepper(currentPhase, verdict) {
+            const phases = ["baseline", "injecting", "waiting_impact", "waiting_recovery", "probing_app", "completed"];
+            const currentIdx = phases.indexOf(currentPhase);
+
+            phases.forEach((p, idx) => {
+                const node = document.getElementById(`step-${p}`);
+                if (!node) return;
+                node.className = "step-node";
+
+                if (currentPhase === "completed") {
+                    node.className = `step-node ${verdict === "PASS" ? "completed" : "failed"}`;
+                } else if (currentPhase === "failed") {
+                    if (idx <= currentIdx) node.className = "step-node failed";
+                } else if (idx < currentIdx) {
+                    node.className = "step-node completed";
+                } else if (idx === currentIdx) {
+                    node.className = "step-node active";
+                }
+            });
+        }
+
+        // 5. Render Oracle Scorecard
+        function renderOracleScorecard(report) {
+            const banner = document.getElementById('scorecardBanner');
+            const verdictText = document.getElementById('scorecardVerdictText');
+            const subtext = document.getElementById('scorecardSubtext');
+            const tbody = document.getElementById('oracleTableBody');
+            const rulesBadge = document.getElementById('oracleRulesBadge');
+
+            const oracle = report.oracle_evaluation || {};
+            const isPass = (report.verdict === "PASS");
+
+            banner.className = `scorecard-banner ${isPass ? 'pass' : 'fail'}`;
+            verdictText.className = `banner-verdict ${isPass ? 'pass' : 'fail'}`;
+            verdictText.innerHTML = `<span>${isPass ? '✅ VERIFICATION PASSED' : '❌ VERIFICATION FAILED'}</span>`;
+            subtext.innerText = `Experiment: ${report.experiment} &bull; ${oracle.passed_rules || 0}/${oracle.total_rules || 0} Invariants Satisfied &bull; Recovery Time: ${report.recovery_time_seconds}s`;
+            rulesBadge.innerText = `${oracle.passed_rules || 0}/${oracle.total_rules || 0} Passed`;
+
+            if (oracle.rule_evaluations && oracle.rule_evaluations.length > 0) {
+                tbody.innerHTML = oracle.rule_evaluations.map(r => `
+                    <tr>
+                        <td><code>${r.rule}</code></td>
+                        <td><span class="badge-pill ${r.passed ? 'pass' : 'fail'}">${r.passed ? 'PASS' : 'FAIL'}</span></td>
+                        <td><code>${escapeHtml(String(r.observed))}</code></td>
+                        <td><code>${escapeHtml(String(r.expected))}</code></td>
+                        <td>${escapeHtml(r.message)}</td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        // 6. Render Telemetry Metrics
+        function renderTelemetry(tel) {
+            if (!tel || !tel.available) return;
+
+            document.getElementById('telTracesCount').innerText = tel.traces_count || 0;
+            document.getElementById('telSpansCount').innerText = `${tel.spans_count || 0} spans recorded`;
+            document.getElementById('telErrorsCount').innerText = tel.error_spans_count || 0;
+            document.getElementById('telErrorRate').innerText = `${tel.error_rate_pct || 0.0}% error rate`;
+
+            const lat = tel.latency_ms || {};
+            document.getElementById('telP50').innerText = `${lat.p50 || 0}ms`;
+            document.getElementById('telP95').innerText = `${lat.p95 || 0}ms`;
+
+            const sampleId = (tel.sample_trace_ids && tel.sample_trace_ids.length > 0) ? tel.sample_trace_ids[0] : "N/A";
+            document.getElementById('telTraceId').innerText = sampleId;
+
+            if (sampleId !== "N/A") {
+                document.getElementById('telTraceLink').innerHTML = `
+                    <a href="http://localhost:16686/trace/${sampleId}" target="_blank" class="btn-link" style="padding:4px 10px; font-size:12px;">
+                        Inspect in Jaeger &rarr;
+                    </a>
+                `;
+            }
+        }
+
+        // 7. Fetch Regression Quality Gate Evaluation
+        async function fetchQualityGate() {
+            try {
+                const res = await fetch('/api/gate');
+                const data = await res.json();
+                const pillText = document.getElementById('gatePillText');
+                const verdictBadge = document.getElementById('gateVerdictBadge');
+                const policiesDiv = document.getElementById('qualityGatePolicies');
+
+                const isApproved = data.gate_passed;
+                pillText.innerHTML = `Gate: <strong style="color:${isApproved ? 'var(--success)' : 'var(--danger)'};">${data.verdict}</strong>`;
+                verdictBadge.innerText = data.verdict;
+                verdictBadge.style.color = isApproved ? "var(--success)" : "var(--danger)";
+
+                policiesDiv.innerHTML = data.policies.map(p => `
+                    <div class="policy-item">
+                        <div>
+                            <div class="policy-name">${p.policy}</div>
+                            <div class="policy-desc">${escapeHtml(p.message)}</div>
+                        </div>
+                        <span class="badge-pill ${p.passed ? 'pass' : 'fail'}">${p.passed ? 'PASS' : 'FAIL'}</span>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error("fetchQualityGate error:", err);
+            }
+        }
+
+        // 8. Fetch Historical Reports
+        async function fetchReports() {
+            try {
+                const res = await fetch('/api/reports');
+                const data = await res.json();
+                const tbody = document.getElementById('reportsTableBody');
+                const countBadge = document.getElementById('reportCountBadge');
+
+                const reports = data.reports || [];
+                countBadge.innerText = `${reports.length} Reports`;
+
+                if (reports.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No reports found.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = reports.map(r => `
+                    <tr>
+                        <td>
+                            <strong>${escapeHtml(r.experiment)}</strong>
+                            <div style="font-size:11px; color:var(--text-muted);">${r.timestamp} &bull; ${escapeHtml(r.target)}</div>
+                        </td>
+                        <td>
+                            <span class="badge-pill ${r.verdict === 'PASS' ? 'pass' : 'fail'}">${r.verdict}</span>
+                        </td>
+                        <td>
+                            <code>${r.recovery_time ? r.recovery_time + 's' : 'N/A'}</code>
+                        </td>
+                        <td>
+                            ${r.has_html ? `<a href="/api/reports/${r.prefix}_report.html" target="_blank" class="report-link">HTML</a>` : ''}
+                            ${r.has_md ? `<a href="/api/reports/${r.prefix}_report.md" target="_blank" class="report-link">MD</a>` : ''}
+                            <a href="/api/reports/${r.filename}" target="_blank" class="report-link">JSON</a>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error("fetchReports error:", err);
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return "";
+            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // Initial Load and Polling Loop (2s)
+        fetchInitialData();
+        setInterval(() => {
+            fetchClusterStatus();
+            fetchExecutionState();
+            if (!isRunning) {
+                fetchQualityGate();
+                fetchReports();
+            }
+        }, 2000);
+    </script>
+</body>
+</html>

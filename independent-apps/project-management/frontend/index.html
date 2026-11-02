@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pulse &bull; Enterprise Project Management Platform</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                        },
+                        dark: {
+                            800: '#1e293b',
+                            900: '#0f172a',
+                            950: '#020617'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- React & ReactDOM & Babel CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        code, .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased flex flex-col">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [view, setView] = useState("dashboard");
+            const [projects, setProjects] = useState([]);
+            const [tasks, setTasks] = useState([]);
+            const [users, setUsers] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [selectedTask, setSelectedTask] = useState(null);
+            const [showNewTaskModal, setShowNewTaskModal] = useState(false);
+            const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+
+            // Fetch live microservices data
+            const fetchData = async () => {
+                setLoading(true);
+                try {
+                    const [resU, resP, resT] = await Promise.all([
+                        fetch("/api/users").then(r => r.ok ? r.json() : []),
+                        fetch("/api/projects").then(r => r.ok ? r.json() : []),
+                        fetch("/api/tasks").then(r => r.ok ? r.json() : [])
+                    ]);
+                    if (resU.length) setUsers(resU);
+                    if (resP.length) setProjects(resP);
+                    if (resT.length) setTasks(resT);
+                } catch (e) {
+                    console.warn("Backend services starting up, using resilient local state:", e);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            useEffect(() => {
+                fetchData();
+                const interval = setInterval(fetchData, 8000);
+                return () => clearInterval(interval);
+            }, []);
+
+            // Fallback initial mock data if services are starting
+            const displayProjects = projects.length ? projects : [
+                { id: "proj-101", name: "Kubernetes Resilience Engine", description: "Automated chaos testing and recovery verification platform for production clusters.", owner_name: "Alice Chen", category: "Reliability Engineering", status: "ACTIVE", progress: 85 },
+                { id: "proj-102", name: "Telemetry & Distributed Tracing Pipeline", description: "OpenTelemetry collector integration with Jaeger and metric aggregators.", owner_name: "Bob Martinez", category: "Observability", status: "ACTIVE", progress: 70 },
+                { id: "proj-103", name: "Zero-Trust Service Mesh Migration", description: "Implementing mTLS, strict RBAC policies, and SPIFFE workload identities across namespaces.", owner_name: "Carol Davis", category: "Security", status: "PLANNING", progress: 30 }
+            ];
+
+            const displayTasks = tasks.length ? tasks : [
+                { id: "task-501", title: "Deploy PodChaos Custom Resource Definition", description: "Configure Chaos Mesh operator to target cartservice and checkoutservice pods.", project_name: "Kubernetes Resilience Engine", assignee_name: "Carol Davis", priority: "CRITICAL", status: "DONE" },
+                { id: "task-502", title: "Implement gRPC Health Probe Adapter", description: "Verify service availability using standard grpc.health.v1 across recovered pods.", project_name: "Kubernetes Resilience Engine", assignee_name: "Bob Martinez", priority: "HIGH", status: "IN_PROGRESS" },
+                { id: "task-503", title: "Configure Jaeger OTLP Ingestion Pipeline", description: "Deploy Jaeger collector and verify cross-namespace trace context propagation.", project_name: "Telemetry & Distributed Tracing Pipeline", assignee_name: "Bob Martinez", priority: "HIGH", status: "DONE" },
+                { id: "task-504", title: "Define NetworkChaos Latency Invariant", description: "Verify that post-recovery p95 latency stays strictly below 1000ms SLA limit.", project_name: "Kubernetes Resilience Engine", assignee_name: "Alice Chen", priority: "MEDIUM", status: "TODO" }
+            ];
+
+            const displayUsers = users.length ? users : [
+                { id: "usr-1", name: "Alice Chen", email: "alice.chen@saas.internal", role: "Engineering Lead", department: "Core Engineering", avatar_color: "#3b82f6" },
+                { id: "usr-2", name: "Bob Martinez", email: "bob.martinez@saas.internal", role: "Backend Architect", department: "Infrastructure", avatar_color: "#10b981" },
+                { id: "usr-3", name: "Carol Davis", email: "carol.davis@saas.internal", role: "DevOps / SRE", department: "Reliability", avatar_color: "#8b5cf6" },
+                { id: "usr-4", name: "Danielle Kim", email: "danielle.kim@saas.internal", role: "Product Manager", department: "Product Delivery", avatar_color: "#f59e0b" }
+            ];
+
+            const completedTasksCount = displayTasks.filter(t => t.status === "DONE").length;
+            const inProgressTasksCount = displayTasks.filter(t => t.status === "IN_PROGRESS").length;
+            const pendingTasksCount = displayTasks.filter(t => t.status === "TODO").length;
+            const avgProgress = Math.round(displayProjects.reduce((acc, p) => acc + (p.progress || 0), 0) / (displayProjects.length || 1));
+
+            const updateTaskStatus = async (taskId, newStatus) => {
+                try {
+                    await fetch(`/api/tasks/${taskId}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ status: newStatus })
+                    });
+                } catch (e) {
+                    console.log("Local state update:", e);
+                }
+                setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+                if (selectedTask && selectedTask.id === taskId) {
+                    setSelectedTask(prev => ({ ...prev, status: newStatus }));
+                }
+            };
+
+            return (
+                <div class="flex h-screen overflow-hidden bg-slate-950">
+                    {/* Sidebar */}
+                    <aside class="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between p-4">
+                        <div>
+                            {/* Brand Header */}
+                            <div class="flex items-center gap-3 px-2 py-3 mb-6 border-b border-slate-800">
+                                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-400 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20">
+                                    P
+                                </div>
+                                <div>
+                                    <h1 class="font-bold text-base tracking-tight text-white flex items-center gap-2">
+                                        Pulse PM
+                                        <span class="text-[10px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded font-mono">v1.0</span>
+                                    </h1>
+                                    <p class="text-xs text-slate-400">Project Management Platform</p>
+                                </div>
+                            </div>
+
+                            {/* Nav Links */}
+                            <nav class="space-y-1">
+                                {[
+                                    { id: "dashboard", label: "Dashboard", icon: "📊" },
+                                    { id: "projects", label: "Projects", icon: "📁", badge: displayProjects.length },
+                                    { id: "tasks", label: "Tasks", icon: "✓", badge: displayTasks.length },
+                                    { id: "team", label: "Team Members", icon: "👥", badge: displayUsers.length }
+                                ].map(item => (
+                                    <button
+                                        key={item.id}
+                                        onClick={() => setView(item.id)}
+                                        class={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                                            view === item.id 
+                                                ? "bg-brand-600 text-white shadow-md shadow-brand-600/30" 
+                                                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                                        }`}
+                                    >
+                                        <div class="flex items-center gap-3">
+                                            <span class="text-base">{item.icon}</span>
+                                            <span>{item.label}</span>
+                                        </div>
+                                        {item.badge !== undefined && (
+                                            <span class={`text-xs px-2 py-0.5 rounded-full font-mono ${
+                                                view === item.id ? "bg-brand-700 text-white" : "bg-slate-800 text-slate-400"
+                                            }`}>
+                                                {item.badge}
+                                            </span>
+                                        )}
+                                    </button>
+                                ))}
+                            </nav>
+                        </div>
+
+                        {/* Cluster / Namespace Indicator */}
+                        <div class="bg-slate-950/80 rounded-xl p-3 border border-slate-800/80">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Cluster Target</span>
+                                <span class="flex items-center gap-1.5 text-xs text-emerald-400 font-mono">
+                                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                    Healthy
+                                </span>
+                            </div>
+                            <p class="text-xs text-slate-300 font-mono">ns: project-platform</p>
+                            <p class="text-[11px] text-slate-500 mt-1">ChaosLab Verified Service</p>
+                        </div>
+                    </aside>
+
+                    {/* Main Content Area */}
+                    <main class="flex-1 flex flex-col overflow-hidden bg-slate-950">
+                        {/* Topbar */}
+                        <header class="h-16 border-b border-slate-800 bg-slate-900/60 backdrop-blur px-8 flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                <h2 class="text-lg font-bold text-white capitalize">{view.replace("-", " ")}</h2>
+                                <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded-full border border-slate-700">
+                                    Live Microservices Telemetry
+                                </span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <button
+                                    onClick={fetchData}
+                                    class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors text-xs flex items-center gap-2 border border-slate-700"
+                                >
+                                    <span>🔄</span> Refresh
+                                </button>
+                                <button
+                                    onClick={() => setShowNewTaskModal(true)}
+                                    class="px-3.5 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium text-xs shadow-md shadow-brand-600/30 flex items-center gap-1.5"
+                                >
+                                    <span>+</span> New Task
+                                </button>
+                            </div>
+                        </header>
+
+                        {/* View Content */}
+                        <div class="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                            {/* DASHBOARD VIEW */}
+                            {view === "dashboard" && (
+                                <div class="space-y-8 max-w-7xl mx-auto">
+                                    {/* Stats Grid */}
+                                    <div class="grid grid-cols-1 md:grid-cols-4 gap-5">
+                                        {[
+                                            { label: "Active Projects", val: displayProjects.length, change: "+2 this quarter", color: "from-blue-500/20 to-indigo-500/20", border: "border-blue-500/30", text: "text-blue-400" },
+                                            { label: "Tasks Completed", val: completedTasksCount, change: `${Math.round(completedTasksCount / (displayTasks.length || 1) * 100)}% completion rate`, color: "from-emerald-500/20 to-teal-500/20", border: "border-emerald-500/30", text: "text-emerald-400" },
+                                            { label: "In Progress Tasks", val: inProgressTasksCount, change: `${pendingTasksCount} pending queue`, color: "from-amber-500/20 to-orange-500/20", border: "border-amber-500/30", text: "text-amber-400" },
+                                            { label: "Engineering Team", val: displayUsers.length, change: "All microservices assigned", color: "from-purple-500/20 to-pink-500/20", border: "border-purple-500/30", text: "text-purple-400" }
+                                        ].map((stat, i) => (
+                                            <div key={i} class={`p-5 rounded-2xl bg-gradient-to-br ${stat.color} bg-slate-900 border ${stat.border} shadow-lg shadow-black/20`}>
+                                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">{stat.label}</p>
+                                                <h3 class={`text-3xl font-extrabold ${stat.text} mt-2 font-mono`}>{stat.val}</h3>
+                                                <p class="text-xs text-slate-400 mt-2 flex items-center gap-1">
+                                                    <span>&bull;</span> {stat.change}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Project Progress Overview */}
+                                    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                                        <div class="flex items-center justify-between mb-5">
+                                            <div>
+                                                <h3 class="text-base font-bold text-white">Active Projects Progression</h3>
+                                                <p class="text-xs text-slate-400">Real-time status synced from Project Service (Port 8002)</p>
+                                            </div>
+                                            <button onClick={() => setView("projects")} class="text-xs text-brand-400 hover:text-brand-300 font-medium">
+                                                View All &rarr;
+                                            </button>
+                                        </div>
+                                        <div class="space-y-4">
+                                            {displayProjects.map(proj => (
+                                                <div key={proj.id} class="p-4 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition-colors">
+                                                    <div class="flex items-center justify-between mb-2">
+                                                        <div>
+                                                            <span class="text-xs font-mono text-indigo-400 uppercase tracking-wider">{proj.category}</span>
+                                                            <h4 class="text-sm font-semibold text-white mt-0.5">{proj.name}</h4>
+                                                        </div>
+                                                        <div class="text-right">
+                                                            <span class="text-sm font-bold text-slate-200 font-mono">{proj.progress}%</span>
+                                                            <p class="text-[11px] text-slate-400">{proj.owner_name}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                                                        <div 
+                                                            class="bg-gradient-to-r from-brand-600 to-indigo-400 h-full rounded-full transition-all duration-500"
+                                                            style={{ width: `${proj.progress}%` }}
+                                                        ></div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Recent Tasks & Team Grid */}
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        {/* Task Distribution */}
+                                        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                                            <h3 class="text-base font-bold text-white mb-1">Task Pipeline Status</h3>
+                                            <p class="text-xs text-slate-400 mb-4">FastAPI Task Service distribution breakdown</p>
+                                            <div class="space-y-3">
+                                                {[
+                                                    { label: "Completed (DONE)", count: completedTasksCount, color: "bg-emerald-500", text: "text-emerald-400" },
+                                                    { label: "In Progress", count: inProgressTasksCount, color: "bg-amber-500", text: "text-amber-400" },
+                                                    { label: "Pending (TODO)", count: pendingTasksCount, color: "bg-slate-500", text: "text-slate-400" }
+                                                ].map((tStatus, idx) => (
+                                                    <div key={idx} class="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800/80">
+                                                        <div class="flex items-center gap-2.5">
+                                                            <span class={`w-2.5 h-2.5 rounded-full ${tStatus.color}`}></span>
+                                                            <span class="text-xs font-medium text-slate-300">{tStatus.label}</span>
+                                                        </div>
+                                                        <span class={`font-mono text-sm font-bold ${tStatus.text}`}>{tStatus.count}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Team Members List */}
+                                        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                                            <h3 class="text-base font-bold text-white mb-1">Team Roster</h3>
+                                            <p class="text-xs text-slate-400 mb-4">Synced from User Service (Port 8001)</p>
+                                            <div class="space-y-3">
+                                                {displayUsers.map(u => (
+                                                    <div key={u.id} class="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                                                        <div class="flex items-center gap-3">
+                                                            <div 
+                                                                class="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs text-white"
+                                                                style={{ backgroundColor: u.avatar_color || "#3b82f6" }}
+                                                            >
+                                                                {u.name.split(" ").map(n => n[0]).join("")}
+                                                            </div>
+                                                            <div>
+                                                                <h5 class="text-xs font-semibold text-white">{u.name}</h5>
+                                                                <p class="text-[11px] text-slate-400">{u.role} &bull; {u.department}</p>
+                                                            </div>
+                                                        </div>
+                                                        <span class="text-[10px] font-mono text-slate-500 bg-slate-800/80 px-2 py-0.5 rounded">
+                                                            {u.id}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* PROJECTS VIEW */}
+                            {view === "projects" && (
+                                <div class="max-w-7xl mx-auto space-y-6">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <h3 class="text-xl font-bold text-white">Project Portfolios</h3>
+                                            <p class="text-xs text-slate-400">Managed via project-service:8002</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => setShowNewProjectModal(true)}
+                                            class="px-3.5 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium text-xs shadow-md shadow-brand-600/30"
+                                        >
+                                            + New Project
+                                        </button>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                        {displayProjects.map(p => (
+                                            <div key={p.id} class="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-colors shadow-lg">
+                                                <div>
+                                                    <div class="flex items-center justify-between mb-3">
+                                                        <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 font-semibold uppercase">
+                                                            {p.category}
+                                                        </span>
+                                                        <span class="text-xs font-mono text-emerald-400 font-semibold">
+                                                            {p.status}
+                                                        </span>
+                                                    </div>
+                                                    <h4 class="text-base font-bold text-white mb-2">{p.name}</h4>
+                                                    <p class="text-xs text-slate-400 leading-relaxed mb-6">{p.description}</p>
+                                                </div>
+                                                <div>
+                                                    <div class="flex items-center justify-between text-xs mb-1.5">
+                                                        <span class="text-slate-400">Progress</span>
+                                                        <span class="font-mono font-bold text-slate-200">{p.progress}%</span>
+                                                    </div>
+                                                    <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden mb-4">
+                                                        <div class="bg-gradient-to-r from-brand-600 to-indigo-400 h-full rounded-full" style={{ width: `${p.progress}%` }}></div>
+                                                    </div>
+                                                    <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+                                                        <span>Lead: <strong class="text-slate-200">{p.owner_name}</strong></span>
+                                                        <span class="font-mono text-[11px] text-slate-500">{p.id}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* TASKS VIEW */}
+                            {view === "tasks" && (
+                                <div class="max-w-7xl mx-auto space-y-6">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <h3 class="text-xl font-bold text-white">Engineering Tasks</h3>
+                                            <p class="text-xs text-slate-400">Managed via task-service:8003 with inter-service tracing</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => setShowNewTaskModal(true)}
+                                            class="px-3.5 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium text-xs shadow-md shadow-brand-600/30"
+                                        >
+                                            + New Task
+                                        </button>
+                                    </div>
+
+                                    {/* Task Cards List */}
+                                    <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                                        <table class="w-full text-left text-xs">
+                                            <thead class="bg-slate-950/80 text-slate-400 border-b border-slate-800 uppercase font-mono text-[11px]">
+                                                <tr>
+                                                    <th class="p-4">Task Title</th>
+                                                    <th class="p-4">Project</th>
+                                                    <th class="p-4">Assignee</th>
+                                                    <th class="p-4">Priority</th>
+                                                    <th class="p-4">Status</th>
+                                                    <th class="p-4 text-right">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-slate-800">
+                                                {displayTasks.map(t => (
+                                                    <tr key={t.id} class="hover:bg-slate-800/40 transition-colors">
+                                                        <td class="p-4">
+                                                            <div 
+                                                                onClick={() => setSelectedTask(t)}
+                                                                class="font-semibold text-slate-100 hover:text-indigo-400 cursor-pointer"
+                                                            >
+                                                                {t.title}
+                                                            </div>
+                                                            <span class="font-mono text-[10px] text-slate-500">{t.id}</span>
+                                                        </td>
+                                                        <td class="p-4 text-slate-300">{t.project_name}</td>
+                                                        <td class="p-4 text-slate-300 font-medium">{t.assignee_name}</td>
+                                                        <td class="p-4">
+                                                            <span class={`px-2 py-0.5 rounded font-mono text-[10px] font-semibold ${
+                                                                t.priority === "CRITICAL" ? "bg-rose-500/20 text-rose-400 border border-rose-500/30" :
+                                                                t.priority === "HIGH" ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" :
+                                                                "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                                                            }`}>
+                                                                {t.priority}
+                                                            </span>
+                                                        </td>
+                                                        <td class="p-4">
+                                                            <select
+                                                                value={t.status}
+                                                                onChange={(e) => updateTaskStatus(t.id, e.target.value)}
+                                                                class={`text-xs font-mono font-semibold rounded px-2.5 py-1 bg-slate-950 border ${
+                                                                    t.status === "DONE" ? "text-emerald-400 border-emerald-500/30" :
+                                                                    t.status === "IN_PROGRESS" ? "text-amber-400 border-amber-500/30" :
+                                                                    "text-slate-400 border-slate-700"
+                                                                }`}
+                                                            >
+                                                                <option value="TODO">TODO</option>
+                                                                <option value="IN_PROGRESS">IN PROGRESS</option>
+                                                                <option value="DONE">DONE</option>
+                                                            </select>
+                                                        </td>
+                                                        <td class="p-4 text-right">
+                                                            <button
+                                                                onClick={() => setSelectedTask(t)}
+                                                                class="px-2.5 py-1 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded text-xs transition-colors"
+                                                            >
+                                                                Details &rarr;
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* TEAM MEMBERS VIEW */}
+                            {view === "team" && (
+                                <div class="max-w-7xl mx-auto space-y-6">
+                                    <div>
+                                        <h3 class="text-xl font-bold text-white">Engineering Roster</h3>
+                                        <p class="text-xs text-slate-400">Microservice directory from user-service:8001</p>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                        {displayUsers.map(u => (
+                                            <div key={u.id} class="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-lg">
+                                                <div 
+                                                    class="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center font-bold text-lg text-white shadow-lg"
+                                                    style={{ backgroundColor: u.avatar_color || "#3b82f6" }}
+                                                >
+                                                    {u.name.split(" ").map(n => n[0]).join("")}
+                                                </div>
+                                                <h4 class="font-bold text-base text-white">{u.name}</h4>
+                                                <p class="text-xs text-brand-400 font-medium mb-1">{u.role}</p>
+                                                <p class="text-[11px] text-slate-400 mb-4">{u.department}</p>
+                                                <div class="pt-3 border-t border-slate-800 text-[11px] text-slate-400 font-mono">
+                                                    {u.email}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </main>
+
+                    {/* Task Detail Modal */}
+                    {selectedTask && (
+                        <div class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                            <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5">
+                                <div class="flex items-start justify-between">
+                                    <div>
+                                        <span class="font-mono text-[10px] text-indigo-400 uppercase tracking-wider">{selectedTask.id}</span>
+                                        <h3 class="text-lg font-bold text-white mt-1">{selectedTask.title}</h3>
+                                    </div>
+                                    <button onClick={() => setSelectedTask(null)} class="text-slate-400 hover:text-white text-lg">&times;</button>
+                                </div>
+                                <p class="text-xs text-slate-300 leading-relaxed">{selectedTask.description}</p>
+                                <div class="grid grid-cols-2 gap-3 text-xs bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                                    <div>
+                                        <span class="text-slate-400">Project</span>
+                                        <p class="font-semibold text-white mt-0.5">{selectedTask.project_name}</p>
+                                    </div>
+                                    <div>
+                                        <span class="text-slate-400">Assignee</span>
+                                        <p class="font-semibold text-white mt-0.5">{selectedTask.assignee_name}</p>
+                                    </div>
+                                    <div>
+                                        <span class="text-slate-400">Priority</span>
+                                        <p class="font-semibold text-amber-400 mt-0.5">{selectedTask.priority}</p>
+                                    </div>
+                                    <div>
+                                        <span class="text-slate-400">Status</span>
+                                        <p class="font-semibold text-emerald-400 mt-0.5">{selectedTask.status}</p>
+                                    </div>
+                                </div>
+                                <div class="flex justify-end gap-3 pt-2">
+                                    <button
+                                        onClick={() => setSelectedTask(null)}
+                                        class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+</body>
+</html>

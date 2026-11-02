@@ -1,0 +1,421 @@
+{
+  "experiment": "project-task-pod-kill",
+  "application_group": "Project Management Platform",
+  "target": "task-service",
+  "namespace": "project-platform",
+  "fault": "pod-kill",
+  "baseline": {
+    "pod_name": "task-service-847574b4d6-6sktv",
+    "ready": "1/1",
+    "status": "Running",
+    "ready_replicas": 1,
+    "ip": "10.244.0.42",
+    "node": "desktop-control-plane"
+  },
+  "timestamps": {
+    "experiment_start": "2026-11-02T03:55:44.539951+00:00",
+    "fault_injected": "2026-11-02T03:55:45.082315+00:00",
+    "original_pod_disappeared": "2026-11-02T03:55:45.239337+00:00",
+    "replacement_ready": "2026-11-02T03:55:52.656376+00:00",
+    "experiment_end": "2026-11-02T03:55:58.936900+00:00"
+  },
+  "original_pod": "task-service-847574b4d6-6sktv",
+  "fault_injected": true,
+  "original_pod_disappeared": true,
+  "replacement_pod": "task-service-847574b4d6-nrvd7",
+  "replacement_ready": true,
+  "recovered_ready_replicas": 1,
+  "recovery_time_seconds": 7.42,
+  "total_recovery_seconds": 7.57,
+  "application": {
+    "enabled": true,
+    "probed_pod": "task-service-847574b4d6-nrvd7",
+    "probe_type": "http",
+    "health_check_passed": true,
+    "health_status": "200 OK",
+    "functional_test_passed": true,
+    "transaction_id": "task-test-probe",
+    "logs_verified": true,
+    "startup_log_detected": true,
+    "log_error_count": 0,
+    "health_details": {
+      "passed": true,
+      "health_status": "200 OK",
+      "status_code": 200,
+      "body": "{\"status\":\"SERVING\",\"service\":\"task-service\",\"total_tasks\":4,\"version\":\"1.0.0\"}",
+      "details": "HTTP GET http://localhost:8003/health returned 200"
+    },
+    "functional_details": {
+      "passed": true,
+      "status_code": 200,
+      "transaction_id": "task-test-probe",
+      "response_body": "{\"status\":\"CONFIRMED\",\"task_id\":\"task-test-probe\",\"title\":\"ChaosLab Resilience Verification Probe\",\"project\":\"Kubernetes Resilience Engine\",\"assignee\":\"Alice Chen\",\"service\":\"task-service\"}",
+      "parsed_json": {
+        "status": "CONFIRMED",
+        "task_id": "task-test-probe",
+        "title": "ChaosLab Resilience Verification Probe",
+        "project": "Kubernetes Resilience Engine",
+        "assignee": "Alice Chen",
+        "service": "task-service"
+      },
+      "details": "Functional GET http://localhost:8003/tasks/test returned 200 (ID: task-test-probe)"
+    },
+    "log_details": {
+      "logs_verified": true,
+      "startup_log_detected": true,
+      "log_error_count": 0,
+      "fatal_errors": [],
+      "details": "Startup pattern detected: True, fatal error count: 0"
+    }
+  },
+  "telemetry": {
+    "available": true,
+    "traces_count": 1,
+    "spans_count": 3,
+    "error_spans_count": 0,
+    "error_rate_pct": 0.0,
+    "latency_ms": {
+      "min": 0.02,
+      "avg": 3.87,
+      "p50": 0.05,
+      "p95": 10.4,
+      "max": 11.55
+    },
+    "sample_trace_ids": [
+      "76a8b3f04ed22b5cfd00aef3a5080c6b"
+    ],
+    "operations": [
+      "GET /health",
+      "GET /health http send"
+    ],
+    "service": "task-service",
+    "fault_window_errors": 0
+  },
+  "chaos_mesh_evidence": {
+    "conditions": [
+      {
+        "status": "False",
+        "type": "AllRecovered"
+      },
+      {
+        "status": "False",
+        "type": "Paused"
+      },
+      {
+        "status": "True",
+        "type": "Selected"
+      },
+      {
+        "status": "True",
+        "type": "AllInjected"
+      }
+    ],
+    "container_records": [
+      {
+        "events": [
+          {
+            "operation": "Apply",
+            "timestamp": "2026-11-02T03:55:45Z",
+            "type": "Succeeded"
+          }
+        ],
+        "id": "project-platform/task-service-847574b4d6-6sktv",
+        "injectedCount": 1,
+        "phase": "Injected",
+        "recoveredCount": 0,
+        "selectorKey": "."
+      }
+    ],
+    "injected": true,
+    "raw_status": {
+      "conditions": [
+        {
+          "status": "False",
+          "type": "AllRecovered"
+        },
+        {
+          "status": "False",
+          "type": "Paused"
+        },
+        {
+          "status": "True",
+          "type": "Selected"
+        },
+        {
+          "status": "True",
+          "type": "AllInjected"
+        }
+      ],
+      "experiment": {
+        "containerRecords": [
+          {
+            "events": [
+              {
+                "operation": "Apply",
+                "timestamp": "2026-11-02T03:55:45Z",
+                "type": "Succeeded"
+              }
+            ],
+            "id": "project-platform/task-service-847574b4d6-6sktv",
+            "injectedCount": 1,
+            "phase": "Injected",
+            "recoveredCount": 0,
+            "selectorKey": "."
+          }
+        ],
+        "desiredPhase": "Run"
+      }
+    }
+  },
+  "kubernetes_events": [
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: Get \"http://10.244.0.36:8003/health\": dial tcp 10.244.0.36:8003: connect: connection refused",
+      "object": "pod/task-service-847574b4d6-8dttd",
+      "type": "Warning",
+      "timestamp": "2026-11-02T03:43:11Z"
+    },
+    {
+      "reason": "Killing",
+      "message": "Stopping container task-service",
+      "object": "pod/task-service-847574b4d6-8dttd",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:50:04Z"
+    },
+    {
+      "reason": "Scheduled",
+      "message": "Successfully assigned project-platform/task-service-847574b4d6-nrvd7 to desktop-control-plane",
+      "object": "pod/task-service-847574b4d6-nrvd7",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:55:45Z"
+    },
+    {
+      "reason": "Pulled",
+      "message": "Container image \"pulse-task-service:latest\" already present on machine and can be accessed by the pod",
+      "object": "pod/task-service-847574b4d6-nrvd7",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:55:45Z"
+    },
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/task-service-847574b4d6-nrvd7",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:55:45Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/task-service-847574b4d6-nrvd7",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:55:45Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: task-service-847574b4d6-8dttd",
+      "object": "replicaset/task-service-847574b4d6",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:42:55Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: task-service-847574b4d6-6sktv",
+      "object": "replicaset/task-service-847574b4d6",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:50:04Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: task-service-847574b4d6-nrvd7",
+      "object": "replicaset/task-service-847574b4d6",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:55:45Z"
+    },
+    {
+      "reason": "ScalingReplicaSet",
+      "message": "Scaled up replica set task-service-847574b4d6 from 0 to 1",
+      "object": "deployment/task-service",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:42:55Z"
+    }
+  ],
+  "config": {
+    "name": "project-task-pod-kill",
+    "target": {
+      "namespace": "project-platform",
+      "label": {
+        "app": "task-service"
+      }
+    },
+    "fault": {
+      "type": "pod-kill",
+      "mode": "one"
+    },
+    "recovery": {
+      "timeout_seconds": 60,
+      "expected_ready_replicas": 1
+    },
+    "application": {
+      "enabled": true,
+      "health_probe": {
+        "type": "http",
+        "port": 8003,
+        "path": "/health",
+        "method": "GET",
+        "expected_status": 200
+      },
+      "functional_check": {
+        "enabled": true,
+        "type": "http",
+        "port": 8003,
+        "path": "/tasks/test",
+        "method": "GET",
+        "expected_status": 200,
+        "expected_key": "task_id"
+      },
+      "logs": {
+        "verify_logs": true,
+        "expected_log_pattern": "Uvicorn running"
+      }
+    },
+    "telemetry": {
+      "enabled": true,
+      "service_name": "task-service",
+      "max_allowed_p95_ms": 1000
+    },
+    "verification": {
+      "expected_ready_replicas": 1,
+      "application": {
+        "enabled": true,
+        "health_probe": {
+          "type": "http",
+          "port": 8003,
+          "path": "/health",
+          "method": "GET",
+          "expected_status": 200
+        },
+        "functional_check": {
+          "enabled": true,
+          "type": "http",
+          "port": 8003,
+          "path": "/tasks/test",
+          "method": "GET",
+          "expected_status": 200,
+          "expected_key": "task_id"
+        },
+        "logs": {
+          "verify_logs": true,
+          "expected_log_pattern": "Uvicorn running"
+        }
+      },
+      "telemetry": {
+        "enabled": true,
+        "service_name": "task-service",
+        "max_allowed_p95_ms": 1000
+      }
+    }
+  },
+  "verdict": "PASS",
+  "failure_reason": null,
+  "oracle_evaluation": {
+    "verdict": "PASS",
+    "total_rules": 11,
+    "applicable_rules": 10,
+    "executed_rules": 10,
+    "passed_rules": 10,
+    "failed_rules": 0,
+    "skipped_rules": 1,
+    "all_rules_passed": true,
+    "failure_reasons": [],
+    "rule_evaluations": [
+      {
+        "rule": "baseline_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target met baseline readiness (1 ready, expected >= 1).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "fault_injected",
+        "passed": true,
+        "status": "PASS",
+        "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+        "observed": "Injected",
+        "expected": "Injected"
+      },
+      {
+        "rule": "target_impact",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target pod disappearance confirmed (task-service-847574b4d6-6sktv).",
+        "observed": true,
+        "expected": true
+      },
+      {
+        "rule": "service_recovery",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered 1 ready replica(s) (replacement: task-service-847574b4d6-nrvd7).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "recovery_within_timeout",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered in 7.42s (within limit of 60.0s).",
+        "observed": "7.42s",
+        "expected": "<=60.0s"
+      },
+      {
+        "rule": "app_health_probe",
+        "passed": true,
+        "status": "PASS",
+        "message": "Application health probe (HTTP) verified: status 200 OK.",
+        "observed": "200 OK",
+        "expected": "SERVING/200 OK"
+      },
+      {
+        "rule": "app_functional_check",
+        "passed": true,
+        "status": "PASS",
+        "message": "Functional transaction verified successfully (Entity ID: task-test-probe).",
+        "observed": "task-test-probe",
+        "expected": "CONFIRMED_OK"
+      },
+      {
+        "rule": "app_logs_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Container logs confirmed clean startup (found 'Uvicorn running', 0 fatal errors).",
+        "observed": "startup=True, errors=0",
+        "expected": "startup=True, errors=0"
+      },
+      {
+        "rule": "telemetry_traces_recorded",
+        "passed": true,
+        "status": "PASS",
+        "message": "Distributed tracing active: 1 traces (3 spans) captured for 'task-service'.",
+        "observed": 1,
+        "expected": ">0"
+      },
+      {
+        "rule": "telemetry_error_spike_detected",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Error spike verification skipped (optional check not required in config).",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "telemetry_latency_recovered",
+        "passed": true,
+        "status": "PASS",
+        "message": "Latency SLA verified: p95 latency 10.40ms within threshold (<=1000.0ms).",
+        "observed": "10.40ms",
+        "expected": "<=1000.0ms"
+      }
+    ]
+  }
+}

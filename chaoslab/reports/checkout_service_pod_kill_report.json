@@ -1,0 +1,374 @@
+{
+  "experiment": "checkout-service-pod-kill",
+  "application_group": "Google Online Boutique",
+  "target": "checkoutservice",
+  "namespace": "default",
+  "fault": "pod-kill",
+  "baseline": {
+    "pod_name": "checkoutservice-8775ddc9-g6g4b",
+    "ready": "1/1",
+    "status": "Running",
+    "ready_replicas": 1,
+    "ip": "10.244.0.33",
+    "node": "desktop-control-plane"
+  },
+  "timestamps": {
+    "experiment_start": "2026-11-02T03:54:33.842571+00:00",
+    "fault_injected": "2026-11-02T03:54:34.387543+00:00",
+    "original_pod_disappeared": "2026-11-02T03:54:34.613362+00:00",
+    "replacement_ready": "2026-11-02T03:54:37.438779+00:00",
+    "experiment_end": "2026-11-02T03:54:43.149363+00:00"
+  },
+  "original_pod": "checkoutservice-8775ddc9-g6g4b",
+  "fault_injected": true,
+  "original_pod_disappeared": true,
+  "replacement_pod": "checkoutservice-8775ddc9-wsxjz",
+  "replacement_ready": true,
+  "recovered_ready_replicas": 1,
+  "recovery_time_seconds": 2.83,
+  "total_recovery_seconds": 3.05,
+  "application": {
+    "enabled": true,
+    "probed_pod": "checkoutservice-8775ddc9-wsxjz",
+    "probe_type": "grpc",
+    "health_check_passed": true,
+    "health_status": "SERVING",
+    "functional_test_passed": false,
+    "transaction_id": null,
+    "logs_verified": true,
+    "startup_log_detected": true,
+    "log_error_count": 0,
+    "health_details": {
+      "passed": true,
+      "health_status": "SERVING",
+      "details": "Kubelet Ready condition confirmed"
+    },
+    "functional_test_skipped": true,
+    "log_details": {
+      "logs_verified": true,
+      "startup_log_detected": true,
+      "log_error_count": 0,
+      "fatal_errors": [],
+      "details": "Startup pattern detected: True, fatal error count: 0"
+    }
+  },
+  "telemetry": {
+    "available": true,
+    "traces_count": 1,
+    "spans_count": 1,
+    "error_spans_count": 0,
+    "error_rate_pct": 0.0,
+    "latency_ms": {
+      "min": 1.05,
+      "avg": 1.05,
+      "p50": 1.05,
+      "p95": 1.05,
+      "max": 1.05
+    },
+    "sample_trace_ids": [
+      "9d957cdea27c70b436d23e95c4c4694b"
+    ],
+    "operations": [
+      "grpc.health.v1.Health/Check"
+    ],
+    "service": "checkoutservice",
+    "fault_window_errors": 0
+  },
+  "chaos_mesh_evidence": {
+    "conditions": [
+      {
+        "status": "True",
+        "type": "Selected"
+      },
+      {
+        "status": "True",
+        "type": "AllInjected"
+      },
+      {
+        "status": "False",
+        "type": "AllRecovered"
+      },
+      {
+        "status": "False",
+        "type": "Paused"
+      }
+    ],
+    "container_records": [
+      {
+        "events": [
+          {
+            "operation": "Apply",
+            "timestamp": "2026-11-02T03:54:34Z",
+            "type": "Succeeded"
+          }
+        ],
+        "id": "default/checkoutservice-8775ddc9-g6g4b",
+        "injectedCount": 1,
+        "phase": "Injected",
+        "recoveredCount": 0,
+        "selectorKey": "."
+      }
+    ],
+    "injected": true,
+    "raw_status": {
+      "conditions": [
+        {
+          "status": "True",
+          "type": "Selected"
+        },
+        {
+          "status": "True",
+          "type": "AllInjected"
+        },
+        {
+          "status": "False",
+          "type": "AllRecovered"
+        },
+        {
+          "status": "False",
+          "type": "Paused"
+        }
+      ],
+      "experiment": {
+        "containerRecords": [
+          {
+            "events": [
+              {
+                "operation": "Apply",
+                "timestamp": "2026-11-02T03:54:34Z",
+                "type": "Succeeded"
+              }
+            ],
+            "id": "default/checkoutservice-8775ddc9-g6g4b",
+            "injectedCount": 1,
+            "phase": "Injected",
+            "recoveredCount": 0,
+            "selectorKey": "."
+          }
+        ],
+        "desiredPhase": "Run"
+      }
+    }
+  },
+  "kubernetes_events": [
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/checkoutservice-8775ddc9-g6g4b",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:29:45Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: timeout: failed to connect service \"10.244.0.33:5050\" within 1s: context deadline exceeded",
+      "object": "pod/checkoutservice-8775ddc9-g6g4b",
+      "type": "Warning",
+      "timestamp": "2026-11-02T03:29:46Z"
+    },
+    {
+      "reason": "Killing",
+      "message": "Stopping container server",
+      "object": "pod/checkoutservice-8775ddc9-g6g4b",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:34Z"
+    },
+    {
+      "reason": "Scheduled",
+      "message": "Successfully assigned default/checkoutservice-8775ddc9-wsxjz to desktop-control-plane",
+      "object": "pod/checkoutservice-8775ddc9-wsxjz",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:34Z"
+    },
+    {
+      "reason": "Pulled",
+      "message": "Container image \"us-central1-docker.pkg.dev/online-boutique-ci/microservices-demo/checkoutservice:v0.10.6\" already present on machine and can be accessed by the pod",
+      "object": "pod/checkoutservice-8775ddc9-wsxjz",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:35Z"
+    },
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/checkoutservice-8775ddc9-wsxjz",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:35Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/checkoutservice-8775ddc9-wsxjz",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:35Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: timeout: failed to connect service \"10.244.0.48:5050\" within 1s: context deadline exceeded",
+      "object": "pod/checkoutservice-8775ddc9-wsxjz",
+      "type": "Warning",
+      "timestamp": "2026-11-02T03:54:36Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: checkoutservice-8775ddc9-g6g4b",
+      "object": "replicaset/checkoutservice-8775ddc9",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:29:44Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: checkoutservice-8775ddc9-wsxjz",
+      "object": "replicaset/checkoutservice-8775ddc9",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:54:34Z"
+    }
+  ],
+  "config": {
+    "name": "checkout-service-pod-kill",
+    "target": {
+      "namespace": "default",
+      "label": {
+        "app": "checkoutservice"
+      }
+    },
+    "fault": {
+      "type": "pod-kill",
+      "mode": "one"
+    },
+    "recovery": {
+      "timeout_seconds": 60,
+      "expected_ready_replicas": 1
+    },
+    "verification": {
+      "expected_ready_replicas": 1,
+      "application": {
+        "enabled": true,
+        "grpc_health_check": true,
+        "expected_health_status": "SERVING",
+        "functional_test": false,
+        "verify_logs": true,
+        "expected_log_pattern": "starting to listen on tcp"
+      },
+      "telemetry": {
+        "enabled": true,
+        "service_name": "checkoutservice",
+        "max_allowed_p95_ms": 1000
+      }
+    },
+    "application": {
+      "enabled": true,
+      "grpc_health_check": true,
+      "expected_health_status": "SERVING",
+      "functional_test": false,
+      "verify_logs": true,
+      "expected_log_pattern": "starting to listen on tcp"
+    },
+    "telemetry": {
+      "enabled": true,
+      "service_name": "checkoutservice",
+      "max_allowed_p95_ms": 1000
+    }
+  },
+  "verdict": "PASS",
+  "failure_reason": null,
+  "oracle_evaluation": {
+    "verdict": "PASS",
+    "total_rules": 11,
+    "applicable_rules": 9,
+    "executed_rules": 9,
+    "passed_rules": 9,
+    "failed_rules": 0,
+    "skipped_rules": 2,
+    "all_rules_passed": true,
+    "failure_reasons": [],
+    "rule_evaluations": [
+      {
+        "rule": "baseline_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target met baseline readiness (1 ready, expected >= 1).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "fault_injected",
+        "passed": true,
+        "status": "PASS",
+        "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+        "observed": "Injected",
+        "expected": "Injected"
+      },
+      {
+        "rule": "target_impact",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target pod disappearance confirmed (checkoutservice-8775ddc9-g6g4b).",
+        "observed": true,
+        "expected": true
+      },
+      {
+        "rule": "service_recovery",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered 1 ready replica(s) (replacement: checkoutservice-8775ddc9-wsxjz).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "recovery_within_timeout",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered in 2.83s (within limit of 60.0s).",
+        "observed": "2.83s",
+        "expected": "<=60.0s"
+      },
+      {
+        "rule": "app_health_probe",
+        "passed": true,
+        "status": "PASS",
+        "message": "Application health probe (GRPC) verified: status SERVING.",
+        "observed": "SERVING",
+        "expected": "SERVING/200 OK"
+      },
+      {
+        "rule": "app_functional_check",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Functional transaction test not configured for this experiment.",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "app_logs_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Container logs confirmed clean startup (found 'starting to listen on tcp', 0 fatal errors).",
+        "observed": "startup=True, errors=0",
+        "expected": "startup=True, errors=0"
+      },
+      {
+        "rule": "telemetry_traces_recorded",
+        "passed": true,
+        "status": "PASS",
+        "message": "Distributed tracing active: 1 traces (1 spans) captured for 'checkoutservice'.",
+        "observed": 1,
+        "expected": ">0"
+      },
+      {
+        "rule": "telemetry_error_spike_detected",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Error spike verification skipped (optional check not required in config).",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "telemetry_latency_recovered",
+        "passed": true,
+        "status": "PASS",
+        "message": "Latency SLA verified: p95 latency 1.05ms within threshold (<=1000.0ms).",
+        "observed": "1.05ms",
+        "expected": "<=1000.0ms"
+      }
+    ]
+  }
+}

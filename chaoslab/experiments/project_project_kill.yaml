@@ -1,0 +1,38 @@
+name: project-service-pod-kill
+
+target:
+  namespace: project-platform
+  label:
+    app: project-service
+
+fault:
+  type: pod-kill
+  mode: one
+
+recovery:
+  timeout_seconds: 60
+  expected_ready_replicas: 1
+
+application:
+  enabled: true
+  health_probe:
+    type: http
+    port: 8002
+    path: /health
+    method: GET
+    expected_status: 200
+  functional_check:
+    enabled: true
+    type: http
+    port: 8002
+    path: /projects
+    method: GET
+    expected_status: 200
+  logs:
+    verify_logs: true
+    expected_log_pattern: "Uvicorn running"
+
+telemetry:
+  enabled: true
+  service_name: "project-service"
+  max_allowed_p95_ms: 1000

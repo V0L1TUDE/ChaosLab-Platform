@@ -21,3 +21,7 @@ verification:
     functional_test: true
     verify_logs: true
     expected_log_pattern: "PaymentService gRPC server started"
+  telemetry:
+    enabled: true
+    service_name: "paymentservice"
+    max_allowed_p95_ms: 1000

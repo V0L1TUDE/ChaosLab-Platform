@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChaosLab Report: project-task-pod-kill</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 24px;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 1040px;
+            margin: 0 auto;
+        }
+        .header {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .header-title h1 {
+            margin: 0 0 6px 0;
+            font-size: 24px;
+        }
+        .header-title p {
+            margin: 0;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+        .verdict-badge {
+            background: #ecfdf5;
+            color: #10b981;
+            border: 2px solid #10b981;
+            padding: 10px 24px;
+            border-radius: 9999px;
+            font-weight: 700;
+            font-size: 20px;
+            letter-spacing: 0.5px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .card h3 {
+            margin: 0 0 4px 0;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+        }
+        .card p {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .section h2 {
+            margin: 0 0 16px 0;
+            font-size: 18px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+        .timeline {
+            position: relative;
+            padding-left: 28px;
+        }
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 7px;
+            top: 6px;
+            bottom: 6px;
+            width: 2px;
+            background: var(--border);
+        }
+        .timeline-item {
+            position: relative;
+            margin-bottom: 16px;
+        }
+        .timeline-item:last-child {
+            margin-bottom: 0;
+        }
+        .timeline-dot {
+            position: absolute;
+            left: -28px;
+            top: 6px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--primary);
+            border: 2px solid #ffffff;
+            box-shadow: 0 0 0 2px var(--primary);
+        }
+        .timeline-content {
+            font-size: 14px;
+        }
+        .timeline-offset {
+            font-weight: 700;
+            color: var(--primary);
+            margin-right: 6px;
+        }
+        .timeline-content p {
+            margin: 2px 0 0 0;
+            color: var(--text-muted);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th, td {
+            text-align: left;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: #f8fafc;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+        code {
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 11px;
+        }
+        .app-highlight {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-top: 12px;
+        }
+        .app-highlight p {
+            margin: 4px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-title">
+                <h1>ChaosLab Report: project-task-pod-kill</h1>
+                <p>Application: <strong>Project Management Platform</strong> &bull; Target: <strong>task-service</strong> &bull; Namespace: <code>project-platform</code> &bull; Fault: <code>pod-kill</code></p>
+            </div>
+            <div class="verdict-badge">PASS</div>
+        </div>
+
+        <!-- Key Metrics Cards -->
+        <div class="grid">
+            <div class="card">
+                <h3>Target Microservice</h3>
+                <p>task-service</p>
+            </div>
+            <div class="card">
+                <h3>Recovery Time</h3>
+                <p>7.42s</p>
+            </div>
+            <div class="card">
+                <h3>Invariants Passed</h3>
+                <p>10 / 10 <span style="font-size:12px; font-weight:normal; color:var(--text-muted);">(1 N/A)</span></p>
+            </div>
+            <div class="card">
+                <h3>Chaos Fault Type</h3>
+                <p>pod-kill</p>
+            </div>
+        </div>
+
+        <!-- Timeline Section -->
+        <div class="section">
+            <h2>Lifecycle Timeline Progression</h2>
+            <div class="timeline">
+                
+            <div class="timeline-item">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                    <span class="timeline-offset">+0.0s</span>
+                    <strong>Experiment Initialized</strong> &mdash; <em>03:55:44.539</em>
+                    <p>Baseline established for task-service</p>
+                </div>
+            </div>
+            
+            <div class="timeline-item">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                    <span class="timeline-offset">+0.54s</span>
+                    <strong>Fault Injected</strong> &mdash; <em>03:55:45.082</em>
+                    <p>Chaos Mesh fault injected (pod-kill)</p>
+                </div>
+            </div>
+            
+            <div class="timeline-item">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                    <span class="timeline-offset">+0.7s</span>
+                    <strong>Target Impact Detected</strong> &mdash; <em>03:55:45.239</em>
+                    <p>Original pod task-service-847574b4d6-6sktv terminated/impacted</p>
+                </div>
+            </div>
+            
+            <div class="timeline-item">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                    <span class="timeline-offset">+8.12s</span>
+                    <strong>Replacement Ready</strong> &mdash; <em>03:55:52.656</em>
+                    <p>Service recovered (task-service-847574b4d6-nrvd7)</p>
+                </div>
+            </div>
+            
+            <div class="timeline-item">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                    <span class="timeline-offset">+14.4s</span>
+                    <strong>Experiment Completed</strong> &mdash; <em>03:55:58.936</em>
+                    <p>All verification rules evaluated by Oracle</p>
+                </div>
+            </div>
+            
+            </div>
+        </div>
+
+        <!-- App Details -->
+        
+        <div class="section">
+            <h2>Application-Level Correctness Verification</h2>
+            <div class="app-highlight">
+                <p><strong>Health Probe:</strong> <code>200 OK</code> &mdash; Verified operational</p>
+                <p><strong>Functional Confirmation:</strong> Valid entity processed (<code>ID: task-test-probe</code>)</p>
+                <p><strong>Container Logs:</strong> Clean startup confirmed (0 fatal errors)</p>
+            </div>
+        </div>
+        
+
+        <!-- Telemetry Section -->
+        
+            <div class="section">
+                <h2>Distributed Tracing & Telemetry (OpenTelemetry / Jaeger)</h2>
+                <div class="grid" style="margin-bottom: 16px;">
+                    <div class="card">
+                        <h3>Traces Captured</h3>
+                        <p>1 <span style="font-size:13px; font-weight:normal; color:var(--text-muted);">(3 spans)</span></p>
+                    </div>
+                    <div class="card">
+                        <h3>Error Spans</h3>
+                        <p>0 <span style="font-size:13px; font-weight:normal; color:var(--text-muted);">(0.0%)</span></p>
+                    </div>
+                    <div class="card">
+                        <h3>p50 Latency</h3>
+                        <p>0.05ms</p>
+                    </div>
+                    <div class="card">
+                        <h3>p95 Latency</h3>
+                        <p>10.4ms</p>
+                    </div>
+                </div>
+                <div class="app-highlight" style="background:#f8fafc; border-color:var(--border);">
+                    <p><strong>Sample Trace IDs:</strong> <code>76a8b3f04ed22b5cfd00aef3a5080c6b</code></p>
+                </div>
+            </div>
+            
+
+        <!-- Oracle Scorecard -->
+        <div class="section">
+            <h2>Verification Oracle Invariant Scorecard</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rule Name</th>
+                        <th>Status</th>
+                        <th>Observed</th>
+                        <th>Expected</th>
+                        <th>Evaluation Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+            <tr>
+                <td><code>baseline_healthy</code></td>
+                <td><span class="badge" style="background:#10b9811a; color:#10b981; border:1px solid #10b9814d;">PASS</span></td>
+                <td><code>1</code></td>
+                <td><code>>=1</code></td>
+                <td>Target met baseline readiness (1 ready, expected >= 1).</td>
+            </tr>
+            
+            <tr>
+                <td><code>fault_injected</code></td>
+                <td><span class="badge" style="background:#10b9811a; color:#10b981; border:1px solid #10b9814d;">PASS</span></td>
+                <td><code>Injected</code></td>
+                <td><code>Injected</code></td>
+                <td>Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).</td>
+            </tr>
+            
+            <tr>
+                <td><code>target_impact</code></td>
+                <td><span class="badge" style="background:#10b9811a; color:#10b981; border:1px solid #10b9814d;">PASS</span></td>
+                <td><code>True</code></td>
+                <td><code>True</code></td>
+                <td>Target pod disappearance confirmed (task-service-847574b4d6-6sktv).</td>
+            </tr>
+            
+            <tr>
+                <td><code>service_recovery</code></td>
+                <td><span class="badge" style="background:#10b9811a; color:#10b981; border:1px solid #10b9814d;">PASS</span></td>
+                <td><code>1</code></td>
+                <td><code>>=1</code></td>
+                <td>Service recovered 1 ready replica(s) (replacement: task-service-847574b4d6-nrvd7).</td>
+            </tr>
+            
+            <tr>
+                <td><code>recovery_within_timeout</code></td>
+                <td><span class="badge" style="background:#10b9811a; color:#10b981; border:1px solid #10b9814d;">PASS</span></td>
+                <td><code>7.42s</code></td>
+                <td><code><=60.0s</code></td>
+                <td>Service recovered in 7.42s (within limit of 60.0s).</td>
+            </tr>
+            
+            <tr>
+                <td><code>app_health_probe</code></td>
+                <td><span class="badge" style="background:#10b9811a; color:#10b981; border:1px solid #10b9814d;">PASS</span></td>
+                <td><code>200 OK</code></td>
+                <td><code>SERVING/200 OK</code></td>
+                <td>Application health probe (HTTP) verified: status 200 OK.</td>
+            </tr>
+            
+            <tr>
+                <td><code>app_functional_check</code></td>
+                <td><span class="badge" style="background:#10b9811a; color:#10b981; border:1px solid #10b9814d;">PASS</span></td>
+                <td><code>task-test-probe</code></td>
+                <td><code>CONFIRMED_OK</code></td>
+                <td>Functional transaction verified successfully (Entity ID: task-test-probe).</td>
+            </tr>
+            
+            <tr>
+                <td><code>app_logs_healthy</code></td>
+                <td><span class="badge" style="background:#10b9811a; color:#10b981; border:1px solid #10b9814d;">PASS</span></td>
+                <td><code>startup=True, errors=0</code></td>
+                <td><code>startup=True, errors=0</code></td>
+                <td>Container logs confirmed clean startup (found 'Uvicorn running', 0 fatal errors).</td>
+            </tr>
+            
+            <tr>
+                <td><code>telemetry_traces_recorded</code></td>
+                <td><span class="badge" style="background:#10b9811a; color:#10b981; border:1px solid #10b9814d;">PASS</span></td>
+                <td><code>1</code></td>
+                <td><code>>0</code></td>
+                <td>Distributed tracing active: 1 traces (3 spans) captured for 'task-service'.</td>
+            </tr>
+            
+            <tr>
+                <td><code>telemetry_error_spike_detected</code></td>
+                <td><span class="badge" style="background:#64748b1a; color:#64748b; border:1px solid #64748b4d;">NOT_APPLICABLE</span></td>
+                <td><code>N/A</code></td>
+                <td><code>N/A</code></td>
+                <td>Error spike verification skipped (optional check not required in config).</td>
+            </tr>
+            
+            <tr>
+                <td><code>telemetry_latency_recovered</code></td>
+                <td><span class="badge" style="background:#10b9811a; color:#10b981; border:1px solid #10b9814d;">PASS</span></td>
+                <td><code>10.40ms</code></td>
+                <td><code><=1000.0ms</code></td>
+                <td>Latency SLA verified: p95 latency 10.40ms within threshold (<=1000.0ms).</td>
+            </tr>
+            
+                </tbody>
+            </table>
+        </div>
+
+        <!-- K8s Events -->
+        
+        <div class="section">
+            <h2>Kubernetes Lifecycle Events</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Reason</th>
+                        <th>Object</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+            <tr>
+                <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">Normal</span></td>
+                <td><strong>Scheduled</strong></td>
+                <td><code>pod/task-service-847574b4d6-nrvd7</code></td>
+                <td>Successfully assigned project-platform/task-service-847574b4d6-nrvd7 to desktop-control-plane</td>
+            </tr>
+            
+            <tr>
+                <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">Normal</span></td>
+                <td><strong>Pulled</strong></td>
+                <td><code>pod/task-service-847574b4d6-nrvd7</code></td>
+                <td>Container image "pulse-task-service:latest" already present on machine and can be accessed by the pod</td>
+            </tr>
+            
+            <tr>
+                <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">Normal</span></td>
+                <td><strong>Created</strong></td>
+                <td><code>pod/task-service-847574b4d6-nrvd7</code></td>
+                <td>Container created</td>
+            </tr>
+            
+            <tr>
+                <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">Normal</span></td>
+                <td><strong>Started</strong></td>
+                <td><code>pod/task-service-847574b4d6-nrvd7</code></td>
+                <td>Container started</td>
+            </tr>
+            
+            <tr>
+                <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">Normal</span></td>
+                <td><strong>SuccessfulCreate</strong></td>
+                <td><code>replicaset/task-service-847574b4d6</code></td>
+                <td>Created pod: task-service-847574b4d6-8dttd</td>
+            </tr>
+            
+            <tr>
+                <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">Normal</span></td>
+                <td><strong>SuccessfulCreate</strong></td>
+                <td><code>replicaset/task-service-847574b4d6</code></td>
+                <td>Created pod: task-service-847574b4d6-6sktv</td>
+            </tr>
+            
+            <tr>
+                <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">Normal</span></td>
+                <td><strong>SuccessfulCreate</strong></td>
+                <td><code>replicaset/task-service-847574b4d6</code></td>
+                <td>Created pod: task-service-847574b4d6-nrvd7</td>
+            </tr>
+            
+            <tr>
+                <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">Normal</span></td>
+                <td><strong>ScalingReplicaSet</strong></td>
+                <td><code>deployment/task-service</code></td>
+                <td>Scaled up replica set task-service-847574b4d6 from 0 to 1</td>
+            </tr>
+            
+                </tbody>
+            </table>
+        </div>
+        
+    </div>
+</body>
+</html>

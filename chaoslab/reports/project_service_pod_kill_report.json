@@ -1,0 +1,443 @@
+{
+  "experiment": "project-service-pod-kill",
+  "application_group": "Project Management Platform",
+  "target": "project-service",
+  "namespace": "project-platform",
+  "fault": "pod-kill",
+  "baseline": {
+    "pod_name": "project-service-58ddf5f844-s9jjr",
+    "ready": "1/1",
+    "status": "Running",
+    "ready_replicas": 1,
+    "ip": "10.244.0.35",
+    "node": "desktop-control-plane"
+  },
+  "timestamps": {
+    "experiment_start": "2026-11-02T03:55:18.382413+00:00",
+    "fault_injected": "2026-11-02T03:55:18.869208+00:00",
+    "original_pod_disappeared": "2026-11-02T03:55:19.026620+00:00",
+    "replacement_ready": "2026-11-02T03:55:25.284863+00:00",
+    "experiment_end": "2026-11-02T03:55:31.464790+00:00"
+  },
+  "original_pod": "project-service-58ddf5f844-s9jjr",
+  "fault_injected": true,
+  "original_pod_disappeared": true,
+  "replacement_pod": "project-service-58ddf5f844-5rql8",
+  "replacement_ready": true,
+  "recovered_ready_replicas": 1,
+  "recovery_time_seconds": 6.26,
+  "total_recovery_seconds": 6.42,
+  "application": {
+    "enabled": true,
+    "probed_pod": "project-service-58ddf5f844-5rql8",
+    "probe_type": "http",
+    "health_check_passed": true,
+    "health_status": "200 OK",
+    "functional_test_passed": true,
+    "transaction_id": "proj-101",
+    "logs_verified": true,
+    "startup_log_detected": true,
+    "log_error_count": 0,
+    "health_details": {
+      "passed": true,
+      "health_status": "200 OK",
+      "status_code": 200,
+      "body": "{\"status\":\"SERVING\",\"service\":\"project-service\",\"total_projects\":3,\"version\":\"1.0.0\"}",
+      "details": "HTTP GET http://localhost:8002/health returned 200"
+    },
+    "functional_details": {
+      "passed": true,
+      "status_code": 200,
+      "transaction_id": "proj-101",
+      "response_body": "[{\"id\":\"proj-101\",\"name\":\"Kubernetes Resilience Engine\",\"description\":\"Automated chaos testing and recovery verification platform for production clusters.\",\"owner_id\":\"usr-1\",\"owner_name\":\"Alice Chen\",\"category\":\"Reliability Engineering\",\"status\":\"ACTIVE\",\"progress\":85},{\"id\":\"proj-102\",\"name\":\"Telemetry & Distributed Tracing Pipeline\",\"description\":\"OpenTelemetry collector integration with Jaeger and metric aggregators.\",\"owner_id\":\"usr-2\",\"owner_name\":\"Bob Martinez\",\"category\":\"Observability\",",
+      "parsed_json": [
+        {
+          "id": "proj-101",
+          "name": "Kubernetes Resilience Engine",
+          "description": "Automated chaos testing and recovery verification platform for production clusters.",
+          "owner_id": "usr-1",
+          "owner_name": "Alice Chen",
+          "category": "Reliability Engineering",
+          "status": "ACTIVE",
+          "progress": 85
+        },
+        {
+          "id": "proj-102",
+          "name": "Telemetry & Distributed Tracing Pipeline",
+          "description": "OpenTelemetry collector integration with Jaeger and metric aggregators.",
+          "owner_id": "usr-2",
+          "owner_name": "Bob Martinez",
+          "category": "Observability",
+          "status": "ACTIVE",
+          "progress": 70
+        },
+        {
+          "id": "proj-103",
+          "name": "Zero-Trust Service Mesh Migration",
+          "description": "Implementing mTLS, strict RBAC policies, and SPIFFE workload identities across namespaces.",
+          "owner_id": "usr-3",
+          "owner_name": "Carol Davis",
+          "category": "Security",
+          "status": "PLANNING",
+          "progress": 30
+        }
+      ],
+      "details": "Functional GET http://localhost:8002/projects returned 200 (ID: proj-101)"
+    },
+    "log_details": {
+      "logs_verified": true,
+      "startup_log_detected": true,
+      "log_error_count": 0,
+      "fatal_errors": [],
+      "details": "Startup pattern detected: True, fatal error count: 0"
+    }
+  },
+  "telemetry": {
+    "available": true,
+    "traces_count": 1,
+    "spans_count": 3,
+    "error_spans_count": 0,
+    "error_rate_pct": 0.0,
+    "latency_ms": {
+      "min": 0.02,
+      "avg": 4.98,
+      "p50": 0.07,
+      "p95": 13.36,
+      "max": 14.83
+    },
+    "sample_trace_ids": [
+      "3b4b44b92e1e714d2a3cf1274e868992"
+    ],
+    "operations": [
+      "GET /health",
+      "GET /health http send"
+    ],
+    "service": "project-service",
+    "fault_window_errors": 0
+  },
+  "chaos_mesh_evidence": {
+    "conditions": [
+      {
+        "status": "True",
+        "type": "Selected"
+      },
+      {
+        "status": "True",
+        "type": "AllInjected"
+      },
+      {
+        "status": "False",
+        "type": "AllRecovered"
+      },
+      {
+        "status": "False",
+        "type": "Paused"
+      }
+    ],
+    "container_records": [
+      {
+        "events": [
+          {
+            "operation": "Apply",
+            "timestamp": "2026-11-02T03:55:18Z",
+            "type": "Succeeded"
+          }
+        ],
+        "id": "project-platform/project-service-58ddf5f844-s9jjr",
+        "injectedCount": 1,
+        "phase": "Injected",
+        "recoveredCount": 0,
+        "selectorKey": "."
+      }
+    ],
+    "injected": true,
+    "raw_status": {
+      "conditions": [
+        {
+          "status": "True",
+          "type": "Selected"
+        },
+        {
+          "status": "True",
+          "type": "AllInjected"
+        },
+        {
+          "status": "False",
+          "type": "AllRecovered"
+        },
+        {
+          "status": "False",
+          "type": "Paused"
+        }
+      ],
+      "experiment": {
+        "containerRecords": [
+          {
+            "events": [
+              {
+                "operation": "Apply",
+                "timestamp": "2026-11-02T03:55:18Z",
+                "type": "Succeeded"
+              }
+            ],
+            "id": "project-platform/project-service-58ddf5f844-s9jjr",
+            "injectedCount": 1,
+            "phase": "Injected",
+            "recoveredCount": 0,
+            "selectorKey": "."
+          }
+        ],
+        "desiredPhase": "Run"
+      }
+    }
+  },
+  "kubernetes_events": [
+    {
+      "reason": "Scheduled",
+      "message": "Successfully assigned project-platform/project-service-58ddf5f844-s9jjr to desktop-control-plane",
+      "object": "pod/project-service-58ddf5f844-s9jjr",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:42:55Z"
+    },
+    {
+      "reason": "Pulling",
+      "message": "Pulling image \"pulse-project-service:latest\"",
+      "object": "pod/project-service-58ddf5f844-s9jjr",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:42:55Z"
+    },
+    {
+      "reason": "Pulled",
+      "message": "Successfully pulled image \"pulse-project-service:latest\" in 244ms (9.649s including waiting). Image size: 70252045 bytes.",
+      "object": "pod/project-service-58ddf5f844-s9jjr",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:05Z"
+    },
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/project-service-58ddf5f844-s9jjr",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:05Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/project-service-58ddf5f844-s9jjr",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:05Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: Get \"http://10.244.0.35:8002/health\": dial tcp 10.244.0.35:8002: connect: connection refused",
+      "object": "pod/project-service-58ddf5f844-s9jjr",
+      "type": "Warning",
+      "timestamp": "2026-11-02T03:43:11Z"
+    },
+    {
+      "reason": "Killing",
+      "message": "Stopping container project-service",
+      "object": "pod/project-service-58ddf5f844-s9jjr",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:55:18Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: project-service-58ddf5f844-s9jjr",
+      "object": "replicaset/project-service-58ddf5f844",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:42:55Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: project-service-58ddf5f844-5rql8",
+      "object": "replicaset/project-service-58ddf5f844",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:55:18Z"
+    },
+    {
+      "reason": "ScalingReplicaSet",
+      "message": "Scaled up replica set project-service-58ddf5f844 from 0 to 1",
+      "object": "deployment/project-service",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:42:55Z"
+    }
+  ],
+  "config": {
+    "name": "project-service-pod-kill",
+    "target": {
+      "namespace": "project-platform",
+      "label": {
+        "app": "project-service"
+      }
+    },
+    "fault": {
+      "type": "pod-kill",
+      "mode": "one"
+    },
+    "recovery": {
+      "timeout_seconds": 60,
+      "expected_ready_replicas": 1
+    },
+    "application": {
+      "enabled": true,
+      "health_probe": {
+        "type": "http",
+        "port": 8002,
+        "path": "/health",
+        "method": "GET",
+        "expected_status": 200
+      },
+      "functional_check": {
+        "enabled": true,
+        "type": "http",
+        "port": 8002,
+        "path": "/projects",
+        "method": "GET",
+        "expected_status": 200
+      },
+      "logs": {
+        "verify_logs": true,
+        "expected_log_pattern": "Uvicorn running"
+      }
+    },
+    "telemetry": {
+      "enabled": true,
+      "service_name": "project-service",
+      "max_allowed_p95_ms": 1000
+    },
+    "verification": {
+      "expected_ready_replicas": 1,
+      "application": {
+        "enabled": true,
+        "health_probe": {
+          "type": "http",
+          "port": 8002,
+          "path": "/health",
+          "method": "GET",
+          "expected_status": 200
+        },
+        "functional_check": {
+          "enabled": true,
+          "type": "http",
+          "port": 8002,
+          "path": "/projects",
+          "method": "GET",
+          "expected_status": 200
+        },
+        "logs": {
+          "verify_logs": true,
+          "expected_log_pattern": "Uvicorn running"
+        }
+      },
+      "telemetry": {
+        "enabled": true,
+        "service_name": "project-service",
+        "max_allowed_p95_ms": 1000
+      }
+    }
+  },
+  "verdict": "PASS",
+  "failure_reason": null,
+  "oracle_evaluation": {
+    "verdict": "PASS",
+    "total_rules": 11,
+    "applicable_rules": 10,
+    "executed_rules": 10,
+    "passed_rules": 10,
+    "failed_rules": 0,
+    "skipped_rules": 1,
+    "all_rules_passed": true,
+    "failure_reasons": [],
+    "rule_evaluations": [
+      {
+        "rule": "baseline_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target met baseline readiness (1 ready, expected >= 1).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "fault_injected",
+        "passed": true,
+        "status": "PASS",
+        "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+        "observed": "Injected",
+        "expected": "Injected"
+      },
+      {
+        "rule": "target_impact",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target pod disappearance confirmed (project-service-58ddf5f844-s9jjr).",
+        "observed": true,
+        "expected": true
+      },
+      {
+        "rule": "service_recovery",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered 1 ready replica(s) (replacement: project-service-58ddf5f844-5rql8).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "recovery_within_timeout",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered in 6.26s (within limit of 60.0s).",
+        "observed": "6.26s",
+        "expected": "<=60.0s"
+      },
+      {
+        "rule": "app_health_probe",
+        "passed": true,
+        "status": "PASS",
+        "message": "Application health probe (HTTP) verified: status 200 OK.",
+        "observed": "200 OK",
+        "expected": "SERVING/200 OK"
+      },
+      {
+        "rule": "app_functional_check",
+        "passed": true,
+        "status": "PASS",
+        "message": "Functional transaction verified successfully (Entity ID: proj-101).",
+        "observed": "proj-101",
+        "expected": "CONFIRMED_OK"
+      },
+      {
+        "rule": "app_logs_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Container logs confirmed clean startup (found 'Uvicorn running', 0 fatal errors).",
+        "observed": "startup=True, errors=0",
+        "expected": "startup=True, errors=0"
+      },
+      {
+        "rule": "telemetry_traces_recorded",
+        "passed": true,
+        "status": "PASS",
+        "message": "Distributed tracing active: 1 traces (3 spans) captured for 'project-service'.",
+        "observed": 1,
+        "expected": ">0"
+      },
+      {
+        "rule": "telemetry_error_spike_detected",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Error spike verification skipped (optional check not required in config).",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "telemetry_latency_recovered",
+        "passed": true,
+        "status": "PASS",
+        "message": "Latency SLA verified: p95 latency 13.36ms within threshold (<=1000.0ms).",
+        "observed": "13.36ms",
+        "expected": "<=1000.0ms"
+      }
+    ]
+  }
+}

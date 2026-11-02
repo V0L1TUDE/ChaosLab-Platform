@@ -1,0 +1,247 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: student-service
+  namespace: learning-platform
+  labels:
+    app: student-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: student-service
+  template:
+    metadata:
+      labels:
+        app: student-service
+    spec:
+      containers:
+      - name: student-service
+        image: lms-student-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8011
+        env:
+        - name: COLLECTOR_ADDR
+          value: "opentelemetrycollector.default.svc.cluster.local:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "student-service"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8011
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8011
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 300m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: student-service
+  namespace: learning-platform
+  labels:
+    app: student-service
+spec:
+  type: ClusterIP
+  selector:
+    app: student-service
+  ports:
+  - port: 8011
+    targetPort: 8011
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: course-service
+  namespace: learning-platform
+  labels:
+    app: course-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: course-service
+  template:
+    metadata:
+      labels:
+        app: course-service
+    spec:
+      containers:
+      - name: course-service
+        image: lms-course-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8012
+        env:
+        - name: STUDENT_SERVICE_URL
+          value: "http://student-service:8011"
+        - name: COLLECTOR_ADDR
+          value: "opentelemetrycollector.default.svc.cluster.local:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "course-service"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8012
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8012
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 300m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: course-service
+  namespace: learning-platform
+  labels:
+    app: course-service
+spec:
+  type: ClusterIP
+  selector:
+    app: course-service
+  ports:
+  - port: 8012
+    targetPort: 8012
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: enrollment-service
+  namespace: learning-platform
+  labels:
+    app: enrollment-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: enrollment-service
+  template:
+    metadata:
+      labels:
+        app: enrollment-service
+    spec:
+      containers:
+      - name: enrollment-service
+        image: lms-enrollment-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8013
+        env:
+        - name: STUDENT_SERVICE_URL
+          value: "http://student-service:8011"
+        - name: COURSE_SERVICE_URL
+          value: "http://course-service:8012"
+        - name: COLLECTOR_ADDR
+          value: "opentelemetrycollector.default.svc.cluster.local:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "enrollment-service"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8013
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8013
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 300m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: enrollment-service
+  namespace: learning-platform
+  labels:
+    app: enrollment-service
+spec:
+  type: ClusterIP
+  selector:
+    app: enrollment-service
+  ports:
+  - port: 8013
+    targetPort: 8013
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lms-frontend
+  namespace: learning-platform
+  labels:
+    app: lms-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lms-frontend
+  template:
+    metadata:
+      labels:
+        app: lms-frontend
+    spec:
+      containers:
+      - name: lms-frontend
+        image: lms-frontend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 20m
+            memory: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lms-frontend
+  namespace: learning-platform
+  labels:
+    app: lms-frontend
+spec:
+  type: NodePort
+  selector:
+    app: lms-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30081

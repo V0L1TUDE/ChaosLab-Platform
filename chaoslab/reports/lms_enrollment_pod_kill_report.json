@@ -1,0 +1,420 @@
+{
+  "experiment": "lms-enrollment-pod-kill",
+  "application_group": "Learning Management System (LMS)",
+  "target": "enrollment-service",
+  "namespace": "learning-platform",
+  "fault": "pod-kill",
+  "baseline": {
+    "pod_name": "enrollment-service-5899bc9774-h626w",
+    "ready": "1/1",
+    "status": "Running",
+    "ready_replicas": 1,
+    "ip": "10.244.0.40",
+    "node": "desktop-control-plane"
+  },
+  "timestamps": {
+    "experiment_start": "2026-11-02T03:53:52.731560+00:00",
+    "fault_injected": "2026-11-02T03:53:53.260544+00:00",
+    "original_pod_disappeared": "2026-11-02T03:53:53.449231+00:00",
+    "replacement_ready": "2026-11-02T03:54:01.027383+00:00",
+    "experiment_end": "2026-11-02T03:54:07.320994+00:00"
+  },
+  "original_pod": "enrollment-service-5899bc9774-h626w",
+  "fault_injected": true,
+  "original_pod_disappeared": true,
+  "replacement_pod": "enrollment-service-5899bc9774-5xmjx",
+  "replacement_ready": true,
+  "recovered_ready_replicas": 1,
+  "recovery_time_seconds": 7.58,
+  "total_recovery_seconds": 7.77,
+  "application": {
+    "enabled": true,
+    "probed_pod": "enrollment-service-5899bc9774-5xmjx",
+    "probe_type": "http",
+    "health_check_passed": true,
+    "health_status": "200 OK",
+    "functional_test_passed": true,
+    "transaction_id": "enr-test-probe",
+    "logs_verified": true,
+    "startup_log_detected": true,
+    "log_error_count": 0,
+    "health_details": {
+      "passed": true,
+      "health_status": "200 OK",
+      "status_code": 200,
+      "body": "{\"status\":\"SERVING\",\"service\":\"enrollment-service\",\"total_enrollments\":4,\"version\":\"1.0.0\"}",
+      "details": "HTTP GET http://localhost:8013/health returned 200"
+    },
+    "functional_details": {
+      "passed": true,
+      "status_code": 200,
+      "transaction_id": "enr-test-probe",
+      "response_body": "{\"status\":\"CONFIRMED\",\"enrollment_id\":\"enr-test-probe\",\"student\":\"Sarah Jenkins\",\"course\":\"Production Kubernetes & Chaos Engineering\",\"service\":\"enrollment-service\"}",
+      "parsed_json": {
+        "status": "CONFIRMED",
+        "enrollment_id": "enr-test-probe",
+        "student": "Sarah Jenkins",
+        "course": "Production Kubernetes & Chaos Engineering",
+        "service": "enrollment-service"
+      },
+      "details": "Functional GET http://localhost:8013/enrollments/test returned 200 (ID: enr-test-probe)"
+    },
+    "log_details": {
+      "logs_verified": true,
+      "startup_log_detected": true,
+      "log_error_count": 0,
+      "fatal_errors": [],
+      "details": "Startup pattern detected: True, fatal error count: 0"
+    }
+  },
+  "telemetry": {
+    "available": true,
+    "traces_count": 1,
+    "spans_count": 3,
+    "error_spans_count": 0,
+    "error_rate_pct": 0.0,
+    "latency_ms": {
+      "min": 0.01,
+      "avg": 4.7,
+      "p50": 0.05,
+      "p95": 12.63,
+      "max": 14.03
+    },
+    "sample_trace_ids": [
+      "aa5aa5c701569b81f424566fd20a8851"
+    ],
+    "operations": [
+      "GET /health",
+      "GET /health http send"
+    ],
+    "service": "enrollment-service",
+    "fault_window_errors": 0
+  },
+  "chaos_mesh_evidence": {
+    "conditions": [
+      {
+        "status": "True",
+        "type": "Selected"
+      },
+      {
+        "status": "True",
+        "type": "AllInjected"
+      },
+      {
+        "status": "False",
+        "type": "AllRecovered"
+      },
+      {
+        "status": "False",
+        "type": "Paused"
+      }
+    ],
+    "container_records": [
+      {
+        "events": [
+          {
+            "operation": "Apply",
+            "timestamp": "2026-11-02T03:53:53Z",
+            "type": "Succeeded"
+          }
+        ],
+        "id": "learning-platform/enrollment-service-5899bc9774-h626w",
+        "injectedCount": 1,
+        "phase": "Injected",
+        "recoveredCount": 0,
+        "selectorKey": "."
+      }
+    ],
+    "injected": true,
+    "raw_status": {
+      "conditions": [
+        {
+          "status": "True",
+          "type": "Selected"
+        },
+        {
+          "status": "True",
+          "type": "AllInjected"
+        },
+        {
+          "status": "False",
+          "type": "AllRecovered"
+        },
+        {
+          "status": "False",
+          "type": "Paused"
+        }
+      ],
+      "experiment": {
+        "containerRecords": [
+          {
+            "events": [
+              {
+                "operation": "Apply",
+                "timestamp": "2026-11-02T03:53:53Z",
+                "type": "Succeeded"
+              }
+            ],
+            "id": "learning-platform/enrollment-service-5899bc9774-h626w",
+            "injectedCount": 1,
+            "phase": "Injected",
+            "recoveredCount": 0,
+            "selectorKey": "."
+          }
+        ],
+        "desiredPhase": "Run"
+      }
+    }
+  },
+  "kubernetes_events": [
+    {
+      "reason": "Scheduled",
+      "message": "Successfully assigned learning-platform/enrollment-service-5899bc9774-h626w to desktop-control-plane",
+      "object": "pod/enrollment-service-5899bc9774-h626w",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:01Z"
+    },
+    {
+      "reason": "Pulling",
+      "message": "Pulling image \"lms-enrollment-service:latest\"",
+      "object": "pod/enrollment-service-5899bc9774-h626w",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:02Z"
+    },
+    {
+      "reason": "Pulled",
+      "message": "Successfully pulled image \"lms-enrollment-service:latest\" in 369ms (7.027s including waiting). Image size: 70252502 bytes.",
+      "object": "pod/enrollment-service-5899bc9774-h626w",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:09Z"
+    },
+    {
+      "reason": "Created",
+      "message": "Container created",
+      "object": "pod/enrollment-service-5899bc9774-h626w",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:09Z"
+    },
+    {
+      "reason": "Started",
+      "message": "Container started",
+      "object": "pod/enrollment-service-5899bc9774-h626w",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:09Z"
+    },
+    {
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: Get \"http://10.244.0.40:8013/health\": dial tcp 10.244.0.40:8013: connect: connection refused",
+      "object": "pod/enrollment-service-5899bc9774-h626w",
+      "type": "Warning",
+      "timestamp": "2026-11-02T03:43:15Z"
+    },
+    {
+      "reason": "Killing",
+      "message": "Stopping container enrollment-service",
+      "object": "pod/enrollment-service-5899bc9774-h626w",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:53:53Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: enrollment-service-5899bc9774-h626w",
+      "object": "replicaset/enrollment-service-5899bc9774",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:01Z"
+    },
+    {
+      "reason": "SuccessfulCreate",
+      "message": "Created pod: enrollment-service-5899bc9774-5xmjx",
+      "object": "replicaset/enrollment-service-5899bc9774",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:53:53Z"
+    },
+    {
+      "reason": "ScalingReplicaSet",
+      "message": "Scaled up replica set enrollment-service-5899bc9774 from 0 to 1",
+      "object": "deployment/enrollment-service",
+      "type": "Normal",
+      "timestamp": "2026-11-02T03:43:01Z"
+    }
+  ],
+  "config": {
+    "name": "lms-enrollment-pod-kill",
+    "target": {
+      "namespace": "learning-platform",
+      "label": {
+        "app": "enrollment-service"
+      }
+    },
+    "fault": {
+      "type": "pod-kill",
+      "mode": "one"
+    },
+    "recovery": {
+      "timeout_seconds": 60,
+      "expected_ready_replicas": 1
+    },
+    "application": {
+      "enabled": true,
+      "health_probe": {
+        "type": "http",
+        "port": 8013,
+        "path": "/health",
+        "method": "GET",
+        "expected_status": 200
+      },
+      "functional_check": {
+        "enabled": true,
+        "type": "http",
+        "port": 8013,
+        "path": "/enrollments/test",
+        "method": "GET",
+        "expected_status": 200,
+        "expected_key": "enrollment_id"
+      },
+      "logs": {
+        "verify_logs": true,
+        "expected_log_pattern": "Uvicorn running"
+      }
+    },
+    "telemetry": {
+      "enabled": true,
+      "service_name": "enrollment-service",
+      "max_allowed_p95_ms": 1000
+    },
+    "verification": {
+      "expected_ready_replicas": 1,
+      "application": {
+        "enabled": true,
+        "health_probe": {
+          "type": "http",
+          "port": 8013,
+          "path": "/health",
+          "method": "GET",
+          "expected_status": 200
+        },
+        "functional_check": {
+          "enabled": true,
+          "type": "http",
+          "port": 8013,
+          "path": "/enrollments/test",
+          "method": "GET",
+          "expected_status": 200,
+          "expected_key": "enrollment_id"
+        },
+        "logs": {
+          "verify_logs": true,
+          "expected_log_pattern": "Uvicorn running"
+        }
+      },
+      "telemetry": {
+        "enabled": true,
+        "service_name": "enrollment-service",
+        "max_allowed_p95_ms": 1000
+      }
+    }
+  },
+  "verdict": "PASS",
+  "failure_reason": null,
+  "oracle_evaluation": {
+    "verdict": "PASS",
+    "total_rules": 11,
+    "applicable_rules": 10,
+    "executed_rules": 10,
+    "passed_rules": 10,
+    "failed_rules": 0,
+    "skipped_rules": 1,
+    "all_rules_passed": true,
+    "failure_reasons": [],
+    "rule_evaluations": [
+      {
+        "rule": "baseline_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target met baseline readiness (1 ready, expected >= 1).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "fault_injected",
+        "passed": true,
+        "status": "PASS",
+        "message": "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded).",
+        "observed": "Injected",
+        "expected": "Injected"
+      },
+      {
+        "rule": "target_impact",
+        "passed": true,
+        "status": "PASS",
+        "message": "Target pod disappearance confirmed (enrollment-service-5899bc9774-h626w).",
+        "observed": true,
+        "expected": true
+      },
+      {
+        "rule": "service_recovery",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered 1 ready replica(s) (replacement: enrollment-service-5899bc9774-5xmjx).",
+        "observed": 1,
+        "expected": ">=1"
+      },
+      {
+        "rule": "recovery_within_timeout",
+        "passed": true,
+        "status": "PASS",
+        "message": "Service recovered in 7.58s (within limit of 60.0s).",
+        "observed": "7.58s",
+        "expected": "<=60.0s"
+      },
+      {
+        "rule": "app_health_probe",
+        "passed": true,
+        "status": "PASS",
+        "message": "Application health probe (HTTP) verified: status 200 OK.",
+        "observed": "200 OK",
+        "expected": "SERVING/200 OK"
+      },
+      {
+        "rule": "app_functional_check",
+        "passed": true,
+        "status": "PASS",
+        "message": "Functional transaction verified successfully (Entity ID: enr-test-probe).",
+        "observed": "enr-test-probe",
+        "expected": "CONFIRMED_OK"
+      },
+      {
+        "rule": "app_logs_healthy",
+        "passed": true,
+        "status": "PASS",
+        "message": "Container logs confirmed clean startup (found 'Uvicorn running', 0 fatal errors).",
+        "observed": "startup=True, errors=0",
+        "expected": "startup=True, errors=0"
+      },
+      {
+        "rule": "telemetry_traces_recorded",
+        "passed": true,
+        "status": "PASS",
+        "message": "Distributed tracing active: 1 traces (3 spans) captured for 'enrollment-service'.",
+        "observed": 1,
+        "expected": ">0"
+      },
+      {
+        "rule": "telemetry_error_spike_detected",
+        "passed": true,
+        "status": "NOT_APPLICABLE",
+        "message": "Error spike verification skipped (optional check not required in config).",
+        "observed": "N/A",
+        "expected": "N/A"
+      },
+      {
+        "rule": "telemetry_latency_recovered",
+        "passed": true,
+        "status": "PASS",
+        "message": "Latency SLA verified: p95 latency 12.63ms within threshold (<=1000.0ms).",
+        "observed": "12.63ms",
+        "expected": "<=1000.0ms"
+      }
+    ]
+  }
+}
