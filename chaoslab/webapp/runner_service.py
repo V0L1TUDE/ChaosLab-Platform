@@ -43,7 +43,7 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
     app = catalog.resolve_app(app_row)
     if not app:
         raise ExperimentRejected("This application cannot run experiments. Upload valid Kubernetes manifests "
-                                 "or use a built-in demo application.", 400)
+                                 "or connect a cluster.", 400)
     if app.get("uploaded") and mode == "live" and app_row["status"] != "deployed":
         raise ExperimentRejected("Deploy the application first: Live experiments need it running in the cluster.", 409)
     if mode not in _USER_MODES:

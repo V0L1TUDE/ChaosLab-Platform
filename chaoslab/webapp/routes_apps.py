@@ -3,7 +3,7 @@
 import json
 from typing import Any, Dict, Optional
 
-from . import catalog, db, deployments, manifests, probe_spec, uploads
+from . import catalog, config, db, deployments, manifests, probe_spec, uploads
 from .http_core import HttpError, json_response, router
 
 
@@ -44,7 +44,8 @@ def app_to_dict(row, experiments_count: int = 0) -> Dict[str, Any]:
 def get_accessible_app(conn, user_id: int, app_id: int):
     """Own uploads + built-in apps only. Other users' apps look like 404 (no existence leak)."""
     row = conn.execute(
-        "SELECT * FROM applications WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (app_id, user_id)
+        "SELECT * FROM applications WHERE id = ? AND (user_id = ? OR (user_id IS NULL AND ?))",
+        (app_id, user_id, int(config.SHOW_DEMO_APPS))
     ).fetchone()
     if not row:
         raise HttpError(404, "Application not found.")
@@ -64,9 +65,9 @@ def list_applications(req):
     with db.session() as conn:
         rows = conn.execute(
             "SELECT a.*, (SELECT COUNT(*) FROM experiments e WHERE e.application_id = a.id AND e.user_id = ?) AS n "
-            "FROM applications a WHERE a.user_id = ? OR a.user_id IS NULL "
+            "FROM applications a WHERE a.user_id = ? OR (a.user_id IS NULL AND ?) "
             "ORDER BY (a.user_id IS NULL) DESC, CASE WHEN a.user_id IS NULL THEN a.id END ASC, a.id DESC",
-            (uid, uid),
+            (uid, uid, int(config.SHOW_DEMO_APPS)),
         ).fetchall()
     return json_response({"applications": [app_to_dict(r, r["n"]) for r in rows]})
 

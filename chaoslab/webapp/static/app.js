@@ -156,7 +156,7 @@ async function pageDashboard() {
     <div class="page-head"><div><h1>Dashboard</h1><p>Welcome back, ${S.user.name}. Your resilience activity at a glance.</p></div>
       <a class="btn primary" href="#/experiments/new">⚡ New experiment</a></div>
     <div class="grid g4" style="margin-bottom:16px">
-      ${stat('Applications', t.applications, 'including the 3 built-in demos')}
+      ${stat('Applications', t.applications, 'uploaded, deployed or in your clusters')}
       ${stat('Experiments', t.experiments, `${t.live} live · ${t.simulated} simulated`)}
       ${stat('Successful', t.successful, 'Oracle verdict PASS')}
       ${stat('Failed', t.failed, 'Oracle FAIL or execution error')}
@@ -166,6 +166,7 @@ async function pageDashboard() {
         ${d.recent.length ? experimentsTable(d.recent) : h`<div class="empty">No experiments yet.<br><a class="btn primary sm" style="margin-top:10px" href="#/experiments/new">Run your first experiment</a></div>`}
       </div>
       <div class="card"><div class="card-title"><h2>Applications</h2><a href="#/apps" class="small">Manage</a></div>
+        ${d.applications.length ? '' : h`<div class="empty">No applications yet.<br><a href="#/clusters">Connect a cluster</a> or <a href="#/apps">upload an application</a>.</div>`}
         ${d.applications.map(a => h`<div class="svc-row" style="padding:8px 0;border-bottom:1px solid #1d2a42">
           <div><a href="#/apps/${a.id}"><b>${a.name}</b></a><div class="muted small">${a.is_builtin ? 'Built-in demo' : a.upload_type.toUpperCase() + ' upload'} · ${a.experiments_count} experiment(s)</div></div>
           ${statusBadge(a.status)}</div>`)}
@@ -194,7 +195,7 @@ function experimentsTable(list, opts) {
 async function pageApps() {
   const {applications} = await api('GET', '/api/applications');
   render(shell('#/apps', h`
-    <div class="page-head"><div><h1>Applications</h1><p>Register your own applications or use the built-in demos.</p></div></div>
+    <div class="page-head"><div><h1>Applications</h1><p>Upload Kubernetes manifests for a sandbox, or connect your own cluster under Clusters.</p></div></div>
     <div class="grid" style="grid-template-columns:3fr 2fr;align-items:start">
       <div class="card"><div class="card-title"><h2>Your applications</h2></div>
         <div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Uploaded</th><th></th></tr></thead><tbody>
@@ -387,7 +388,12 @@ function discoveryNote(d, refreshId) {
 /* ---------- new experiment ---------- */
 async function pageNewExperiment(appParam) {
   const [{applications}, capsRes] = await Promise.all([api('GET', '/api/applications'), api('GET', '/api/capabilities')]);
-  const builtins = applications.filter(a => a.executable);   // built-in demos + the user's validated uploads
+  const builtins = applications.filter(a => a.executable);   // the user's runnable apps (plus demos when enabled)
+  if (!builtins.length) {
+    return render(shell('#/experiments/new', h`<div class="page-head"><div><h1>New experiment</h1><p>Choose a target and a fault, then review and run.</p></div></div>
+      <div class="card"><div class="empty"><b>You have no applications to test yet.</b><br>Connect your own cluster, or upload Kubernetes manifests and deploy them to a sandbox.
+        <div class="actions" style="justify-content:center;margin-top:14px"><a class="btn primary" href="#/clusters">Connect a cluster</a><a class="btn" href="#/apps">Upload an application</a></div></div></div>`));
+  }
   const requested = appParam ? applications.find(a => a.id === +appParam) : null;
   let current = requested && requested.executable ? requested : builtins[0];
   const cats = {};
@@ -406,7 +412,7 @@ async function pageNewExperiment(appParam) {
       <input type="radio" name="${name}" value="${value}" ${selected ? 'checked' : ''} ${disabled ? 'disabled' : ''}>${title}<small>${sub}</small></label>`;
     render(shell('#/experiments/new', h`
       <div class="page-head"><div><h1>New experiment</h1><p>Choose a target and a fault, then review and run.</p></div></div>
-      ${requested && !requested.executable ? h`<div class="banner info">“${requested.name}” is an uploaded application and cannot be executed in this MVP. Experiments run against a built-in demo application below.</div>` : ''}
+      ${requested && !requested.executable ? h`<div class="banner info">“${requested.name}” is an uploaded application and cannot be executed in this MVP. Pick one of your runnable applications below.</div>` : ''}
       <div class="grid" style="grid-template-columns:2fr 1fr;align-items:start">
       <form data-form="experiment" id="exp-form">
         <div class="card"><h3><span class="step-n">1</span>Application</h3>
