@@ -435,6 +435,7 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
 
     is_network_fault = "network" in fault_type.lower()
 
+    impacted_pod_names = []
     original_pod_disappeared = False
     original_pod_disappeared_dt = None
     replacement_pod = None
@@ -458,6 +459,7 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
             ]
 
             if len(active_original_pods) < len(initial_pods):
+                impacted_pod_names = sorted(initial_names - {p["name"] for p in active_original_pods})
                 original_pod_disappeared = True
                 original_pod_disappeared_dt = datetime.now(timezone.utc)
                 print(f"Target pod disappeared: {initial_names - {p['name'] for p in active_original_pods}}")
@@ -601,7 +603,8 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
             "replacement_ready": replacement_ready_dt.isoformat() if replacement_ready_dt else None,
             "experiment_end": experiment_end_dt.isoformat()
         },
-        "original_pod": baseline_pod["name"],
+        "original_pod": impacted_pod_names[0] if impacted_pod_names else baseline_pod["name"],
+        "impacted_pods": impacted_pod_names,
         "fault_injected": chaos_success,
         "original_pod_disappeared": original_pod_disappeared,
         "replacement_pod": replacement_pod["name"] if replacement_pod else None,

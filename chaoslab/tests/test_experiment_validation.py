@@ -1,5 +1,7 @@
 """Offline ChaosLab safety checks — never accesses a Kubernetes cluster."""
 import copy
+import contextlib
+import io
 from pathlib import Path
 import sys
 import unittest
@@ -71,6 +73,34 @@ class ExperimentValidationTests(unittest.TestCase):
         self.assertEqual(kind, "PodChaos")
         self.assertEqual(manifest["spec"]["action"], "pod-kill")
         self.assertEqual(manifest["spec"]["selector"]["labelSelectors"], {"app": "paymentservice"})
+
+
+    def test_report_tracks_the_replica_that_actually_disappeared(self):
+        def pod(name):
+            return {"name": name, "ready": "1/1", "status": "Running"}
+        first, second, replacement = pod("first"), pod("second"), pod("replacement")
+        for removed, survivor in ((first, second), (second, first)):
+            with self.subTest(removed=removed["name"]), contextlib.ExitStack() as stack:
+                stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                stack.enter_context(patch.object(engine, "get_pods", side_effect=[
+                    [first, second], [survivor, replacement], [survivor, replacement]]))
+                stack.enter_context(patch.object(engine, "get_ready_pods", side_effect=[
+                    [first, second], [survivor, replacement], [survivor, replacement]]))
+                stack.enter_context(patch.object(engine, "apply_chaos", return_value=(True, "test", "ok", "PodChaos")))
+                cleanup = stack.enter_context(patch.object(engine, "cleanup_chaos"))
+                stack.enter_context(patch.object(engine, "get_chaos_mesh_evidence", return_value={}))
+                stack.enter_context(patch.object(engine, "get_kubernetes_events", return_value=[]))
+                stack.enter_context(patch.object(engine, "probe_application", return_value={"enabled": False}))
+                stack.enter_context(patch.object(engine.time, "sleep"))
+                save = stack.enter_context(patch.object(engine.ExperimentReporter, "save_all", return_value={
+                    "html": "report.html", "markdown": "report.md", "json": "report.json"}))
+                engine.run_experiment({**self.valid, "recovery": {"expected_ready_replicas": 2, "timeout_seconds": 60}})
+                evidence = save.call_args.args[1]
+                self.assertEqual(evidence["original_pod"], removed["name"])
+                self.assertEqual(evidence["impacted_pods"], [removed["name"]])
+                self.assertEqual(evidence["baseline"]["pod_name"], "first")
+                self.assertTrue(evidence["replacement_ready"])
+                cleanup.assert_called_once()
 
 
 if __name__ == "__main__":
