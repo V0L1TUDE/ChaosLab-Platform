@@ -1,0 +1,35 @@
+[Unit]
+Description=ChaosLab web app (behind Caddy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=chaoslab
+Group=chaoslab
+WorkingDirectory=/opt/chaoslab/chaoslab
+EnvironmentFile=/etc/chaoslab/chaoslab.env
+# Listens on localhost only; Caddy terminates HTTPS and forwards to it.
+ExecStart=/usr/bin/python3 -m webapp --host 127.0.0.1 --port 8090
+Restart=on-failure
+RestartSec=3
+
+# Hardening: the code is read-only, only the data directory is writable.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/chaoslab
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

@@ -652,11 +652,12 @@ async function pageOracle(expParam) {
 
 /* ---------- clusters (bring your own cluster via the ChaosLab agent) ---------- */
 function enrollPanel(c, e) {
-  const cmd = ns => `python agent.py --server ${e.server_url} --token ${e.token} --allowed-namespaces ${ns}`;
+  const cmd = ns => `python agent.py --server ${e.server_url} --token ${e.token} --allowed-namespaces ${ns}${e.ca_url ? ' --ca-cert chaoslab-ca.crt' : ''}`;
   return h`<div class="card"><div class="card-title"><h2>Connect your agent</h2></div>
     <div class="banner info"><div>This token is shown <b>once</b> and works <b>once</b> (expires ${fmtTime(e.expires_at)}). The agent exchanges it for a revocable credential. It makes outbound calls only: nothing connects in to your cluster.</div></div>
     <div class="field"><label>Namespaces the agent is allowed to test (comma separated). The agent enforces this list itself.</label>
-      <input type="text" id="enroll-ns" value="default" data-server="${e.server_url}" data-token="${e.token}"></div>
+      <input type="text" id="enroll-ns" value="default" data-server="${e.server_url}" data-token="${e.token}" data-ca="${e.ca_url ? '1' : ''}"></div>
+    ${e.ca_url ? h`<div class="banner info"><div>This server uses a self-signed certificate. First download <a href="${e.ca_url}" download>chaoslab-ca.crt</a> into the <code>chaoslab/agent</code> folder; the command below tells the agent to trust exactly that certificate.</div></div>` : ''}
     <label>Run on a machine (or pod) where <code>kubectl</code> can reach your cluster, from <code>chaoslab/agent</code>:</label>
     <pre class="log" id="enroll-cmd" style="white-space:pre-wrap;word-break:break-all">${cmd('default')}</pre>
     <div class="actions" style="margin-top:10px"><button class="btn sm" data-action="copy-cmd">Copy command</button>
@@ -763,7 +764,7 @@ document.addEventListener('input', ev => {
   if (ev.target.id === 'enroll-ns') {
     const ns = ev.target.value.replace(/\s+/g, '') || 'default';
     document.getElementById('enroll-cmd').textContent =
-      `python agent.py --server ${ev.target.dataset.server} --token ${ev.target.dataset.token} --allowed-namespaces ${ns}`;
+      `python agent.py --server ${ev.target.dataset.server} --token ${ev.target.dataset.token} --allowed-namespaces ${ns}${ev.target.dataset.ca ? ' --ca-cert chaoslab-ca.crt' : ''}`;
   }
 });
 
