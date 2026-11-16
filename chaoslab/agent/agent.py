@@ -51,8 +51,11 @@ def log(msg: str) -> None:
 class Policy:
     def __init__(self, namespaces: List[str], faults: Tuple[str, ...] = ENGINE_FAULTS, max_duration: int = 120):
         bad = [n for n in namespaces if not DNS_LABEL.match(n)]
-        if not namespaces or bad:
+        if not namespaces:
             raise ValueError("allowed namespaces must be a non-empty list of valid namespace names")
+        if bad:
+            raise ValueError("invalid namespace name(s): " + ", ".join(repr(n) for n in bad)
+                             + " (use lowercase letters, digits and '-' only; no dots, spaces or trailing punctuation)")
         self.namespaces = sorted(set(namespaces))
         self.faults = tuple(f for f in faults if f in ENGINE_FAULTS)
         self.max_duration = max_duration
