@@ -264,3 +264,54 @@ class NamespaceCheckTests(unittest.TestCase):
         # a least-privilege agent may not be allowed to read namespace objects: unknown != missing
         self.assertEqual(agent_mod.missing_namespaces(["shop"], self.fake([], forbidden=True)), [])
         self.assertEqual(agent_mod.suggest_namespaces(["shop"], self.fake([], forbidden=True)), {})
+
+
+class CredentialChoiceTests(unittest.TestCase):
+    """Regression: a stored (revoked) credential silently overrode a fresh --token the user had just pasted."""
+
+    def make(self, enroll_result):
+        class FakeApi:
+            base = "https://chaoslab.example.com"
+
+            def post(self, path, body, bearer=None, timeout=40):
+                if path == "/agent/v1/enroll":
+                    if isinstance(enroll_result, Exception):
+                        raise enroll_result
+                    return {"credential": "cla_new", "cluster_id": 2, "name": "docker-desktop-2"}
+                return {}
+        state = os.path.join(tempfile.mkdtemp(), "agent.json")
+        a = agent_mod.Agent(FakeApi(), agent_mod.Policy(["shop"]), state, cluster_probe=lambda: ("uid-cred-test-01", "v1"))
+        return a
+
+    def store_old(self, a):
+        a.cred = {"server": a.api.base, "credential": "cla_old_revoked", "cluster_id": 1}
+        a.save_state()
+        a.cred = None
+
+    def test_new_token_wins_over_stored_credential(self):
+        a = self.make(None)
+        self.store_old(a)
+        self.assertIsNone(agent_mod.establish_credential(a, "cle_fresh"))
+        self.assertEqual((a.cred["credential"], a.cred["cluster_id"]), ("cla_new", 2))
+        reloaded = self.make(None); reloaded.state_file = a.state_file; reloaded.load_state()
+        self.assertEqual(reloaded.cred["credential"], "cla_new")          # persisted, old one replaced
+
+    def test_used_token_falls_back_to_stored_credential(self):
+        a = self.make(agent_mod.ApiError(401, "Invalid or expired enrollment token."))
+        self.store_old(a)
+        self.assertIsNone(agent_mod.establish_credential(a, "cle_already_used"))
+        self.assertEqual(a.cred["credential"], "cla_old_revoked")
+
+    def test_errors_are_reported(self):
+        a = self.make(agent_mod.ApiError(401, "Invalid or expired enrollment token."))
+        self.assertIn("Enrollment failed", agent_mod.establish_credential(a, "cle_bad"))       # nothing stored
+        self.assertIn("Not enrolled yet", self.make(None).__class__ and agent_mod.establish_credential(self.make(None), None))
+        b = self.make(agent_mod.ApiError(429, "Too many"))
+        self.store_old(b)
+        self.assertIn("Enrollment failed", agent_mod.establish_credential(b, "cle_x"))        # only 401 falls back
+
+    def test_no_token_uses_stored_credential(self):
+        a = self.make(None)
+        self.store_old(a)
+        self.assertIsNone(agent_mod.establish_credential(a, None))
+        self.assertEqual(a.cred["credential"], "cla_old_revoked")
