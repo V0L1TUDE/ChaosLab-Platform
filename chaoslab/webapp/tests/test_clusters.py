@@ -404,3 +404,15 @@ class KillSwitchTests(ClusterBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EmptyNamespaceMessageTests(ClusterBase):
+    def test_empty_namespace_explains_instead_of_empty_choice_list(self):
+        agent = connect(self.user, namespaces=("empty-ns",))
+        agent.poll(inventory={"empty-ns": []})
+        app_id = register_app(self.user, agent, namespace="empty-ns", name="Empty")
+        status, data, _ = start_experiment(self.user, app_id)
+        self.assertEqual(status, 400)
+        self.assertIn("No targetable services were found", data["error"])
+        self.assertIn("empty-ns", data["error"])
+        self.assertNotIn("Choose one of: .", data["error"])

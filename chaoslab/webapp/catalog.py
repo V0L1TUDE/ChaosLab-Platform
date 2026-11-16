@@ -296,6 +296,10 @@ def validate_selection(app: Dict[str, Any], service: Any, fault_id: Any, duratio
     """Validate a user's experiment choice; returns the normalized duration or raises ValueError."""
     names = targetable_services(app)
     if not isinstance(service, str) or service not in names:
+        if not names:
+            raise ValueError(f"No targetable services were found for {app['name']} in namespace '{app['namespace']}'. "
+                             "Check that the namespace name is right (kubectl get deployments -n <namespace>), that the "
+                             "agent's --allowed-namespaces matches it, and that the Deployments carry an 'app' label.")
         raise ValueError(f"Unknown or non-targetable service for {app['name']}. Choose one of: {', '.join(names)}.")
     if not isinstance(fault_id, str) or fault_id not in _FAULT_BY_ID:
         raise ValueError(f"Unknown fault type. Choose one of: {', '.join(_FAULT_BY_ID)}.")

@@ -201,6 +201,33 @@ def cluster_identity() -> Tuple[Optional[str], str]:
     return (uid if ok and uid else None), version
 
 
+def missing_namespaces(namespaces: List[str], kubectl_fn: Callable = None) -> List[str]:
+    """Allowed namespaces that verifiably do not exist. Unknown (e.g. RBAC-forbidden) counts as present."""
+    run = kubectl_fn or kubectl
+    missing = []
+    for ns in namespaces:
+        ok, out = run(["get", "namespace", ns, "-o", "name"])
+        if not ok and ("NotFound" in out or "not found" in out.lower()):
+            missing.append(ns)
+    return missing
+
+
+def suggest_namespaces(missing: List[str], kubectl_fn: Callable = None) -> Dict[str, str]:
+    """Closest existing namespace for each missing one (when the agent may list namespaces)."""
+    import difflib
+    run = kubectl_fn or kubectl
+    ok, out = run(["get", "namespaces", "-o", "name"])
+    if not ok:
+        return {}
+    existing = [line.split("/", 1)[-1] for line in out.splitlines() if line.strip()]
+    hints = {}
+    for ns in missing:
+        close = difflib.get_close_matches(ns, existing, n=1, cutoff=0.6)
+        if close:
+            hints[ns] = close[0]
+    return hints
+
+
 def collect_inventory(namespaces: List[str]) -> Dict[str, List[Dict[str, Any]]]:
     inv: Dict[str, List[Dict[str, Any]]] = {}
     for ns in namespaces:
@@ -545,6 +572,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         api = Api(args.server, args.insecure_allow_http, args.ca_cert)
     except ValueError as e:
         p.error(str(e))
+
+    missing = missing_namespaces(policy.namespaces)
+    if missing:
+        hints = suggest_namespaces(missing)
+        detail = "; ".join(f"'{m}'" + (f" (did you mean '{hints[m]}'?)" if m in hints else "") for m in missing)
+        p.error(f"namespace(s) not found in this cluster: {detail}. "
+                "Check with: kubectl get namespaces")
 
     state_file = os.path.join(args.state_dir, "agent.json")
     agent = Agent(api, policy, state_file,
