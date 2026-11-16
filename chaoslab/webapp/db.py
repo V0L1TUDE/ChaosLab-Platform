@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS applications (
     namespace         TEXT,                   -- sandbox namespace while deployed
     deployed_at       TEXT,
     deploy_error      TEXT,
+    probe_json        TEXT,                   -- {service: validated probe spec} for connected-cluster apps
     cluster_id        INTEGER REFERENCES clusters(id),   -- set for applications living in a connected cluster
     created_at        TEXT    NOT NULL
 );
@@ -187,7 +188,7 @@ def init_db() -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(applications)")}
         if "storage_backend" not in cols:
             conn.execute("ALTER TABLE applications ADD COLUMN storage_backend TEXT NOT NULL DEFAULT 'local'")
-        for col in ("manifest_json", "validation_json", "namespace", "deployed_at", "deploy_error"):
+        for col in ("manifest_json", "validation_json", "namespace", "deployed_at", "deploy_error", "probe_json"):
             if col not in cols:
                 conn.execute(f"ALTER TABLE applications ADD COLUMN {col} TEXT")
         if "cluster_id" not in cols:

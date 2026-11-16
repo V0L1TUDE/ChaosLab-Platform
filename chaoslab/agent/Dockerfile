@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir pyyaml==6.0.2 \
  && chmod +x /usr/local/bin/kubectl \
  && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
-COPY chaoslab/agent/agent.py /app/agent.py
+COPY chaoslab/agent/agent.py chaoslab/agent/safe_probes.py /app/
 COPY chaoslab/verifier /app/verifier
 
 # Non-root. The credential lives in /state (mount a volume so it survives restarts).

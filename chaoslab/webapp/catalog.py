@@ -121,6 +121,7 @@ def _resolve_cluster_app(row) -> Optional[Dict[str, Any]]:
             "cluster_id": cluster["id"], "cluster_name": cluster["name"], "cluster_online": clusters.is_online(cluster),
             "cluster_paused": bool(cluster["paused"]), "cluster_seen": cluster["last_seen"],
             "agent_inventory": clusters.inventory_services(cluster, row["namespace"]),
+            "probes": json.loads(row["probe_json"]) if row["probe_json"] else {},
             "inventory_at": cluster["inventory_at"]}
 
 
@@ -278,7 +279,8 @@ def describe_app(app: Dict[str, Any], force: bool = False) -> Dict[str, Any]:
         "targetable_services": [s["name"] for s in disc["services"] if s["targetable"]],
         "discovery": {"source": disc["source"], "discovered_at": disc["discovered_at"], "error": disc["error"]},
         "faults": FAULTS,
-        "curated_experiments": curated_experiments(app["namespace"]),
+        # curated YAMLs only apply to the built-in demo apps (user apps get probes they configure themselves)
+        "curated_experiments": curated_experiments(app["namespace"]) if app.get("curated", True) else [],
     }
 
 
@@ -356,6 +358,11 @@ def build_engine_config(app: Dict[str, Any], service: str, fault_id: str, durati
             "expected_log_pattern": "started",
         }
         cfg["telemetry"] = {"enabled": True, "service_name": service, "verify_error_spike": True, "max_allowed_p95_ms": 1000}
+    elif (app.get("probes") or {}).get(service):
+        # Declarative probes the user configured for this service of a connected cluster (executed by the agent).
+        from . import probe_spec
+        cfg["application"] = probe_spec.to_engine_application(app["probes"][service])
+        cfg.setdefault("telemetry", {"enabled": False})
     else:
         # Curated YAMLs may nest these under `verification` (legacy schema); only default when absent in both.
         verification = cfg.get("verification") or {}

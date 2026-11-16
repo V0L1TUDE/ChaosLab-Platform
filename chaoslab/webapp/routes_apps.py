@@ -3,7 +3,7 @@
 import json
 from typing import Any, Dict, Optional
 
-from . import catalog, db, deployments, manifests, uploads
+from . import catalog, db, deployments, manifests, probe_spec, uploads
 from .http_core import HttpError, json_response, router
 
 
@@ -136,6 +136,7 @@ def application_detail(req):
             data["note"] = ("This application runs in your own cluster. Experiments are executed by the ChaosLab agent "
                             "inside that cluster; nothing is deployed or changed by this server.")
             if resolved:
+                data["probes"] = resolved["probes"]
                 data["catalog"] = catalog.describe_app(resolved)
                 data["cluster"] = {"id": resolved["cluster_id"], "name": resolved["cluster_name"],
                                    "online": resolved["cluster_online"], "paused": resolved["cluster_paused"]}
@@ -203,3 +204,32 @@ def undeploy_application(req):
     with db.session() as conn:
         row = conn.execute("SELECT * FROM applications WHERE id = ?", (row["id"],)).fetchone()
     return json_response({"deployment": deployments.deployment_info(row)})
+
+
+@router.route("POST", "/api/applications/<id>/probes")
+def set_probes(req):
+    """Set (or clear, with probes=null) the declarative verification probes for one service of a cluster app."""
+    body = req.json()
+    service = body.get("service")
+    with db.session() as conn:
+        row = conn.execute("SELECT * FROM applications WHERE id = ? AND user_id = ?", (_app_id(req), req.user["id"])).fetchone()
+        if not row:
+            raise HttpError(404, "Application not found.")
+        if not row["cluster_id"]:
+            raise HttpError(409, "Verification probes are available for applications in a connected cluster.")
+        resolved = catalog.resolve_app(row)
+        if not resolved:
+            raise HttpError(409, "The cluster for this application was removed.")
+        names = catalog.targetable_services(resolved)
+        if not isinstance(service, str) or service not in names:
+            raise HttpError(400, f"Unknown service. Choose one of: {', '.join(names) or '(none reported yet)'}.")
+        probes = json.loads(row["probe_json"]) if row["probe_json"] else {}
+        if body.get("probes") is None:
+            probes.pop(service, None)
+        else:
+            clean, err = probe_spec.validate(body["probes"])
+            if err:
+                raise HttpError(400, err)
+            probes[service] = clean
+        conn.execute("UPDATE applications SET probe_json = ? WHERE id = ?", (json.dumps(probes) if probes else None, row["id"]))
+    return json_response({"probes": probes})
