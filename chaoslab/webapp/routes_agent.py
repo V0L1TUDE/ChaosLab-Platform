@@ -57,7 +57,7 @@ def poll(req):
         paused = bool(current["paused"])
         cancel = jobs.cancel_requests(row["id"])
         job = None if (paused or busy) else jobs.lease_next(row["id"], busy)
-        if job or cancel or paused or time.time() >= deadline:
+        if job or cancel or time.time() >= deadline:
             break
         time.sleep(0.5)
     if job:

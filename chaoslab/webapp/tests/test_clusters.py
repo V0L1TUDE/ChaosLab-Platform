@@ -325,6 +325,15 @@ class KillSwitchTests(ClusterBase):
             time.sleep(0.05)
         self.fail("job was never enqueued")
 
+    def test_paused_poll_waits_instead_of_spinning(self):
+        self.user.post(f"/api/clusters/{self.agent.cluster_id}/emergency-stop")
+        started = time.time()
+        status, data, _ = self.agent.poll(wait=1.5)
+        self.assertEqual(status, 200)
+        self.assertTrue(data["paused"])
+        self.assertGreaterEqual(time.time() - started, 1.2)          # it held the request open (long-poll)
+        self.user.post(f"/api/clusters/{self.agent.cluster_id}/resume")
+
     def test_paused_cluster_refuses_new_jobs_even_if_stop_races_the_enqueue(self):
         from webapp import jobs
         self.user.post(f"/api/clusters/{self.agent.cluster_id}/emergency-stop")

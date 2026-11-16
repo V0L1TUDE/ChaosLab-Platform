@@ -119,6 +119,37 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(os.stat(f).st_mode & 0o777, 0o600)
 
 
+class PausedLoopTests(unittest.TestCase):
+    def test_paused_agent_backs_off_and_logs_once(self):
+        """Regression: a paused cluster made the agent spin and print the pause message hundreds of times."""
+        replies = [{"paused": True, "job": None, "cancel": []}] * 3 + [{"paused": False, "job": None, "cancel": []}]
+        posts = []
+
+        class FakeApi:
+            base = "http://127.0.0.1:1"
+
+            def post(self, path, body, bearer=None, timeout=40):
+                posts.append(path)
+                return replies[min(len(posts) - 1, len(replies) - 1)]
+        a = agent_mod.Agent(FakeApi(), agent_mod.Policy(["shop"]), os.path.join(tempfile.mkdtemp(), "a.json"),
+                            cluster_probe=lambda: ("uid-paused-test-1", "v1"), inventory_fn=lambda ns: {}, poll_wait=0)
+        a.cred = {"credential": "cla_x", "cluster_id": 1}
+        a.paused_backoff = 0.3
+        logged = []
+        orig = agent_mod.log
+        agent_mod.log = lambda m: logged.append(m)
+        try:
+            started = time.time()
+            for _ in range(4):
+                a.step()
+            elapsed = time.time() - started
+        finally:
+            agent_mod.log = orig
+        self.assertGreaterEqual(elapsed, 0.8)                                     # 3 paused polls x 0.3 s backoff
+        self.assertEqual(sum("Cluster is paused" in m for m in logged), 1)        # logged once, not on every poll
+        self.assertEqual(sum("Cluster resumed" in m for m in logged), 1)
+
+
 class AgentEndToEndTests(unittest.TestCase):
     """The real Agent class talking to the real server over HTTP, with a fake executor."""
 
