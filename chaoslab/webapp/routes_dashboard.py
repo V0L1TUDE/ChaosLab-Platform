@@ -1,6 +1,6 @@
 """Dashboard aggregates, computed from the caller's own records only."""
 
-from . import db, runner_service
+from . import config, db, runner_service
 from .http_core import json_response, router
 from .routes_apps import app_to_dict
 
@@ -11,8 +11,9 @@ def dashboard(req):
     with db.session() as conn:
         apps = conn.execute(
             "SELECT a.*, (SELECT COUNT(*) FROM experiments e WHERE e.application_id = a.id AND e.user_id = ?) AS n "
-            "FROM applications a WHERE a.user_id = ? OR a.user_id IS NULL "
-            "ORDER BY (a.user_id IS NULL) DESC, CASE WHEN a.user_id IS NULL THEN a.id END ASC, a.id DESC", (uid, uid)).fetchall()
+            "FROM applications a WHERE a.user_id = ? OR (a.user_id IS NULL AND ?) "
+            "ORDER BY (a.user_id IS NULL) DESC, CASE WHEN a.user_id IS NULL THEN a.id END ASC, a.id DESC",
+            (uid, uid, int(config.SHOW_DEMO_APPS))).fetchall()
         stats = conn.execute(
             "SELECT COUNT(*) AS total, "
             "SUM(status = 'completed' AND oracle_verdict = 'PASS') AS passed, "

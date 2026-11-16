@@ -88,6 +88,10 @@ MAX_CLUSTERS_PER_USER = _env_int("CHAOSLAB_MAX_CLUSTERS_PER_USER", 5)
 AGENT_MAX_WAIT_SECONDS = 25                                                     # long-poll ceiling
 PUBLIC_URL = os.environ.get("CHAOSLAB_PUBLIC_URL", "").strip().rstrip("/")      # shown in agent install commands
 
+# Built-in demo applications (Online Boutique, LMS, Project Platform). OFF by default: users only see their own
+# applications (uploads, sandbox apps, connected clusters). Set CHAOSLAB_SHOW_DEMO_APPS=true to expose the demos.
+SHOW_DEMO_APPS = _env_bool("CHAOSLAB_SHOW_DEMO_APPS", False)
+
 # Cluster service discovery (read-only `kubectl get deployments`); falls back to a static list.
 DISCOVERY_ENABLED = _env_bool("CHAOSLAB_DISCOVERY_ENABLED", True)
 

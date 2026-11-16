@@ -35,6 +35,7 @@ cd chaoslab && python -m unittest discover -s webapp/tests
 | `CHAOSLAB_DATA_DIR` | `chaoslab/webapp/data` | Root for DB, uploads, reports (git-ignored) |
 | `CHAOSLAB_DB_PATH` | `<data>/chaoslab.db` | SQLite file |
 | `CHAOSLAB_UPLOAD_DIR` | `<data>/uploads` | Uploaded files when `CHAOSLAB_STORAGE=local` |
+| `CHAOSLAB_SHOW_DEMO_APPS` | `false` | Expose the 3 built-in demo apps to every user. **Off by default**: users only see their own apps (uploads, sandbox apps, connected clusters) |
 | `CHAOSLAB_DEPLOY_ENABLED` | = `CHAOSLAB_LIVE_ENABLED` | Allow deploying uploaded manifests to the cluster |
 | `CHAOSLAB_DEPLOY_TTL_MINUTES` | `120` | Auto-undeploy age (`0` disables) |
 | `CHAOSLAB_DEPLOY_TIMEOUT_SECONDS` | `180` | Wait for workloads to become Ready |
