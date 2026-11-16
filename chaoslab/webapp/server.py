@@ -52,7 +52,10 @@ def main(argv=None) -> None:
     print("=" * 78)
     print(f"Serving at   : http://{args.host}:{args.port}")
     print(f"Database     : {config.DB_PATH}")
-    print(f"Uploads      : {config.UPLOAD_DIR}")
+    if config.STORAGE_BACKEND == "s3":
+        print(f"Uploads      : s3://{config.S3_BUCKET}/{config.S3_PREFIX} (region {config.S3_REGION or 'default'}, SSE {config.S3_SSE})")
+    else:
+        print(f"Uploads      : {config.UPLOAD_DIR} (local)")
     print(f"Reports      : {config.REPORT_DIR}")
     print(f"Live mode    : {'enabled' if config.LIVE_ENABLED else 'disabled (CHAOSLAB_LIVE_ENABLED=false)'}")
     print("Press Ctrl+C to stop.")

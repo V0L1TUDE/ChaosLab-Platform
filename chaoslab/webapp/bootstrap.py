@@ -1,6 +1,6 @@
 """Startup tasks: seed the built-in demo application, recover interrupted experiments."""
 
-from . import catalog, db
+from . import catalog, db, storage
 
 
 def seed_builtin_applications() -> None:
@@ -30,7 +30,19 @@ def recover_interrupted_experiments() -> int:
         return cur.rowcount
 
 
+def check_storage() -> None:
+    """Fail fast on a misconfigured backend (missing bucket / boto3); only warn if S3 is merely unreachable."""
+    try:
+        backend = storage.get_storage()
+    except storage.StorageError as e:
+        raise SystemExit(f"Storage misconfigured: {e}")
+    problem = backend.check()
+    if problem:
+        print(f"WARNING: storage backend '{backend.name}': {problem}. Uploads will fail until this is fixed.")
+
+
 def on_startup() -> None:
+    check_storage()
     seed_builtin_applications()
     n = recover_interrupted_experiments()
     if n:

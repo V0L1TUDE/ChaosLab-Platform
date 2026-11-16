@@ -57,6 +57,17 @@ MIN_PASSWORD_LENGTH = 8
 MAX_UPLOAD_BYTES = _env_int("CHAOSLAB_MAX_UPLOAD_MB", 10) * 1024 * 1024
 ALLOWED_UPLOAD_EXTENSIONS = (".zip", ".tar", ".tar.gz", ".tgz", ".yaml", ".yml", ".json", ".md", ".txt")
 
+# Storage of uploaded files: "local" (default) or "s3". S3 credentials come from the standard boto3
+# chain (IAM role, AWS_* env vars, profile); they are never configured here or exposed to the browser.
+STORAGE_BACKEND = os.environ.get("CHAOSLAB_STORAGE", "local").strip().lower()
+S3_BUCKET = os.environ.get("CHAOSLAB_S3_BUCKET", "").strip()
+S3_REGION = os.environ.get("CHAOSLAB_S3_REGION", "").strip()
+S3_ENDPOINT_URL = os.environ.get("CHAOSLAB_S3_ENDPOINT_URL", "").strip()          # MinIO / LocalStack
+_prefix = os.environ.get("CHAOSLAB_S3_PREFIX", "uploads/").strip().lstrip("/")
+S3_PREFIX = _prefix if (not _prefix or _prefix.endswith("/")) else _prefix + "/"
+S3_SSE = os.environ.get("CHAOSLAB_S3_SSE", "AES256").strip()                       # AES256 | aws:kms | none
+S3_KMS_KEY_ID = os.environ.get("CHAOSLAB_S3_KMS_KEY_ID", "").strip()
+
 # Cluster service discovery (read-only `kubectl get deployments`); falls back to a static list.
 DISCOVERY_ENABLED = _env_bool("CHAOSLAB_DISCOVERY_ENABLED", True)
 
