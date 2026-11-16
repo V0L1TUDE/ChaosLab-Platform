@@ -178,6 +178,7 @@ class HttpProber:
         headers = func_spec.get("headers", {})
         payload = func_spec.get("body")
         expected_status = int(func_spec.get("expected_status", 200))
+        expected_pattern = func_spec.get("expected_body_pattern")
         expected_key = func_spec.get("expected_json_key") or func_spec.get("expected_key")
         timeout = int(func_spec.get("timeout", 5))
 
@@ -192,11 +193,11 @@ class HttpProber:
 
         # Build in-container Python test script
         python_script = (
-            "import urllib.request, json, sys\n"
+            "import urllib.request, urllib.error, json, sys\n"
             f"headers = {repr(headers)}\n"
             f"payload_data = {repr(payload_json)}\n"
             f"data_bytes = payload_data.encode('utf-8') if payload_data else None\n"
-            f"req = urllib.request.Request('{target_url}', data=data_bytes, headers=headers, method='{method}')\n"
+            f"req = urllib.request.Request({target_url!r}, data=data_bytes, headers=headers, method={method!r})\n"
             "try:\n"
             f"    with urllib.request.urlopen(req, timeout={timeout}) as resp:\n"
             "        body_str = resp.read().decode('utf-8', errors='ignore')\n"
@@ -215,12 +216,35 @@ class HttpProber:
             "kubectl", "exec", pod_name, "-n", namespace, "--", "python", "-c", python_script
         ], timeout=timeout + 5)
 
+        # Minimal images commonly provide curl rather than Python. Preserve the
+        # same status/body assertions for read-only checks on those workloads.
+        if res.returncode != 0 and "error" not in res.stdout and method == "GET" and payload is None and not headers:
+            command = ["kubectl", "exec", pod_name, "-n", namespace, "--", "curl", "-sS",
+                       "--max-time", str(timeout), "--connect-timeout", str(timeout),
+                       "-w", '\n{"status": %{http_code}}', target_url]
+            fallback = run_command(command, timeout=timeout + 5)
+            if fallback.returncode == 0:
+                lines = fallback.stdout.strip().splitlines()
+                try:
+                    status = json.loads(lines[-1])["status"]
+                    res = subprocess.CompletedProcess(command, 0, json.dumps({
+                        "status": status, "body": "\n".join(lines[:-1])}), "")
+                except (ValueError, KeyError, IndexError):
+                    pass
+
         if res.returncode == 0:
             try:
                 data = json.loads(res.stdout.strip().splitlines()[-1])
                 status = data.get("status")
                 body = data.get("body", "")
+                failures = []
                 passed = (status == expected_status)
+                if not passed:
+                    failures.append(f"Expected HTTP {expected_status}, received {status}")
+                if expected_pattern is not None:
+                    if expected_pattern not in body:
+                        passed = False
+                        failures.append("Expected response text not found")
                 found_id = None
                 parsed_json = None
 
@@ -235,8 +259,9 @@ class HttpProber:
 
                         if target_dict:
                             # Try to extract the requested key or common identity keys
-                            if expected_key and expected_key in target_dict:
-                                found_id = str(target_dict[expected_key])
+                            if expected_key:
+                                if expected_key in target_dict and target_dict[expected_key] is not None:
+                                    found_id = str(target_dict[expected_key])
                             elif "id" in target_dict:
                                 found_id = str(target_dict["id"])
                             elif "task_id" in target_dict:
@@ -252,11 +277,13 @@ class HttpProber:
                     except Exception:
                         pass
 
-                if expected_key and not found_id:
+                if expected_key and found_id is None:
                     passed = False
+                    failures.append(f"Required JSON key missing or null: {expected_key}")
 
                 return {
                     "passed": passed,
+                    "error": "; ".join(failures) if failures else None,
                     "status_code": status,
                     "transaction_id": found_id,
                     "response_body": body[:500],

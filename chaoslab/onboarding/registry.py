@@ -84,6 +84,28 @@ def validate_health_probe(spec: object) -> dict | None:
     return result
 
 
+def validate_functional_check(spec: object) -> dict | None:
+    """A read-only HTTP response assertion; no onboarding mutation requests."""
+    if spec is None:
+        return None
+    fields = {"type", "path", "port", "expected_status", "timeout", "expected_body_pattern", "expected_json_key", "method"}
+    if not isinstance(spec, dict) or set(spec) - fields:
+        raise ApplicationError("Invalid functional check fields")
+    if spec.get("method", "GET") != "GET":
+        raise ApplicationError("Onboarding functional checks support GET only")
+    result = validate_health_probe({k: v for k, v in spec.items() if k in {"type", "path", "port", "expected_status", "timeout"}})
+    result.update({"enabled": True, "method": "GET"})
+    for field in ("expected_body_pattern", "expected_json_key"):
+        if field in spec:
+            value = spec[field]
+            if not isinstance(value, str) or not value.strip() or len(value) > 200 or any(ord(c) < 32 for c in value):
+                raise ApplicationError(f"{field} must contain 1–200 printable characters")
+            result[field] = value
+    if not any(field in result for field in ("expected_body_pattern", "expected_json_key")):
+        raise ApplicationError("Functional check requires expected response text or a JSON key")
+    return result
+
+
 class ApplicationRegistry:
     def __init__(self, database_path: str | Path = DEFAULT_DB, experiments_dir: str | Path = EXPERIMENTS_DIR):
         self.database_path = Path(database_path)
@@ -164,11 +186,12 @@ class ApplicationRegistry:
                 "ready_count": ready_count, "expected_replicas": app["expected_replicas"],
                 "workload_ready": ready_count >= app["expected_replicas"]}
 
-    def generate_experiment(self, app_id: str, health_probe: dict | None = None) -> dict:
+    def generate_experiment(self, app_id: str, health_probe: dict | None = None, functional_check: dict | None = None) -> dict:
         app = self.get(app_id)
         if app["namespace"] not in allowed_namespaces():
             raise ApplicationError("Namespace no longer permitted")
         health_probe = validate_health_probe(health_probe)
+        functional_check = validate_functional_check(functional_check)
         # A draft configuration, NOT a fault-execution command.
         name = f"registered-{app['id']}-pod-kill"
         payload = {
@@ -181,6 +204,9 @@ class ApplicationRegistry:
                             if health_probe else {"enabled": False}),
             "telemetry": {"enabled": False},
         }
+        if functional_check:
+            payload["application"]["enabled"] = True
+            payload["application"]["functional_check"] = functional_check
         validate_experiment_config(payload)
         self.experiments_dir.mkdir(parents=True, exist_ok=True)
         target = self.experiments_dir / f"{name}.yaml"

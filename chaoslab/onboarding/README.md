@@ -111,3 +111,21 @@ New engine reports are archived under `chaoslab/reports/runs/<run-id>/` and igno
 by Git. Existing `<experiment>_report.*` latest exports are retained for the CLI
 and quality gate. Report timestamps come from experiment evidence rather than
 file-copy times. Saving a report does not run an experiment.
+
+### Functional response checks
+
+Expand **Optional functional response check** on a registered application. Enable
+it and provide a pod-local path/port plus expected response text, a top-level JSON
+key, or both. Text matching is case-sensitive. A requested JSON key must exist
+with a non-null value; an unrelated `id` field cannot satisfy it. Both assertions
+must pass when both are supplied. Onboarding permits read-only GET requests only.
+
+For the nginx local demo, use path `/`, port `8080`, and text `Welcome to nginx!`.
+This checks the expected page contents after recovery, not a business transaction.
+API callers pass a `functional_check` object alongside `health_probe` to the draft
+endpoint. Supported fields: `type: http`, `method: GET`, `path`, `port`,
+`expected_status` (200–299), `timeout` (1–10 seconds), `expected_body_pattern`, and
+`expected_json_key`. At least one response assertion is required. Regenerating
+without this option removes it from the draft. Python or curl must be available
+inside the selected container. Existing manually configured transaction probes
+are preserved; onboarding does not expose write operations.
