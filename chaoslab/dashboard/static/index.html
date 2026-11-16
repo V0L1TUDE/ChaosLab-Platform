@@ -725,7 +725,16 @@
                     </div>
                 </div>
 
-                <button id="runBtn" class="btn-primary" onclick="triggerExperiment()">
+                <div class="config-preview-box" style="margin-bottom:12px;">
+                    <button class="btn-outline" id="preflightBtn" onclick="fetchPreflight()">Check readiness</button>
+                    <div id="preflightTarget" style="margin-top:10px; overflow-wrap:anywhere;">Review the target before running.</div>
+                    <ul id="preflightChecks" style="padding-left:20px; max-height:220px; overflow:auto;"></ul>
+                    <label style="display:flex; gap:8px; font-size:12px; align-items:center;">
+                        <input id="confirmTarget" type="checkbox" onchange="updateRunAvailability()" disabled>
+                        I reviewed the cluster and target above. This run will terminate one matching pod.
+                    </label>
+                </div>
+                <button id="runBtn" class="btn-primary" onclick="triggerExperiment()" disabled>
                     <span>⚡ Inject Chaos & Verify</span>
                 </button>
             </section>
@@ -906,6 +915,10 @@
         let experimentsList = [];
         let isRunning = false;
         let activeExecutionExperiment = null;
+        let preflightResult = null;
+        let preflightCheckedAt = 0;
+        let launchPending = false;
+        let selectedPreviewName = null;
 
         async function fetchInitialData() {
             await Promise.all([
@@ -1018,6 +1031,14 @@
             const select = document.getElementById('experimentSelect');
             const exp = experimentsList.find(e => e.name === select.value);
             if (!exp) return;
+            if (selectedPreviewName !== select.value) {
+                selectedPreviewName = select.value;
+                preflightResult = null;
+                document.getElementById('confirmTarget').checked = false;
+                document.getElementById('preflightChecks').replaceChildren();
+                document.getElementById('preflightTarget').textContent = 'Click Check readiness to review this target.';
+                updateRunAvailability();
+            }
 
             document.getElementById('prevTarget').innerText = `${exp.target} (${exp.namespace})`;
             document.getElementById('prevFault').innerText = exp.fault;
@@ -1026,11 +1047,53 @@
             document.getElementById('prevTelemetry').innerText = exp.telemetry;
         }
 
+        function updateRunAvailability() {
+            const current = document.getElementById('experimentSelect').value;
+            const reviewed = preflightResult && preflightResult.experiment === current;
+            const fresh = reviewed && Date.now() - preflightCheckedAt < 60000;
+            const ready = fresh && preflightResult.ready;
+            const confirm = document.getElementById('confirmTarget');
+            confirm.disabled = !ready || isRunning || launchPending;
+            if (!ready) confirm.checked = false;
+            const button = document.getElementById('runBtn');
+            button.disabled = !ready || !confirm.checked || isRunning || launchPending;
+            button.textContent = isRunning ? 'Experiment running…' : launchPending ? 'Checking launch…' : 'Run reviewed experiment';
+            document.getElementById('preflightBtn').disabled = isRunning || launchPending;
+        }
+
+        async function fetchPreflight() {
+            const name = document.getElementById('experimentSelect').value;
+            preflightResult = null;
+            document.getElementById('confirmTarget').checked = false;
+            updateRunAvailability();
+            document.getElementById('preflightTarget').textContent = 'Checking local prerequisites…';
+            try {
+                const response = await fetch(`/api/preflight?name=${encodeURIComponent(name)}`);
+                if (!response.ok) throw Error('Preflight request failed');
+                const data = await response.json();
+                if (document.getElementById('experimentSelect').value !== name) return;
+                preflightResult = data;
+                preflightCheckedAt = Date.now();
+                document.getElementById('preflightTarget').textContent = `${data.context || 'Cluster not pinned'} · ${data.namespace || 'No namespace'} · ${data.selector || 'No selector'} · ${data.fault || 'No fault'}`;
+                document.getElementById('preflightChecks').replaceChildren(...data.checks.map(check => {
+                    const row = document.createElement('li');
+                    row.textContent = `${check.passed ? 'PASS' : 'BLOCKED'} — ${check.name}: ${check.detail}`;
+                    row.style.color = check.passed ? 'var(--success)' : 'var(--danger)';
+                    return row;
+                }));
+            } catch (error) {
+                document.getElementById('preflightTarget').textContent = error.message;
+            }
+            updateRunAvailability();
+        }
+
         // 3. Trigger Experiment Run
         async function triggerExperiment() {
             const select = document.getElementById('experimentSelect');
             const expName = select.value;
-            if (!expName) return;
+            if (!expName || !preflightResult || !preflightResult.ready || !document.getElementById('confirmTarget').checked) return;
+            launchPending = true;
+            updateRunAvailability();
 
             const runBtn = document.getElementById('runBtn');
             runBtn.disabled = true;
@@ -1040,18 +1103,22 @@
                 const res = await fetch('/api/run', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: expName })
+                    body: JSON.stringify({ name: expName, review_token: preflightResult.review_token, confirm_target: true })
                 });
                 const data = await res.json();
                 if (!res.ok) {
                     alert(data.error || "Failed to start experiment");
-                    runBtn.disabled = false;
-                    runBtn.innerHTML = `<span>⚡ Inject Chaos & Verify</span>`;
+                    preflightResult = null;
+                } else {
+                    isRunning = true;
+                    preflightResult = null;
                 }
             } catch (err) {
                 alert("Network error starting experiment: " + err);
-                runBtn.disabled = false;
-                runBtn.innerHTML = `<span>⚡ Inject Chaos & Verify</span>`;
+                preflightResult = null;
+            } finally {
+                launchPending = false;
+                updateRunAvailability();
             }
         }
 
@@ -1060,7 +1127,10 @@
             try {
                 const res = await fetch('/api/execution');
                 const data = await res.json();
+                const wasRunning = isRunning;
                 isRunning = data.running;
+                if (wasRunning && !isRunning) preflightResult = null;
+                updateRunAvailability();
                 activeExecutionExperiment = isRunning ? data.experiment : null;
 
                 const runBtn = document.getElementById('runBtn');
@@ -1076,8 +1146,7 @@
                     statusBadge.innerText = data.phase.toUpperCase();
                     statusBadge.style.color = "var(--primary)";
                 } else {
-                    runBtn.disabled = false;
-                    runBtn.innerHTML = `<span>⚡ Inject Chaos & Verify</span>`;
+                    updateRunAvailability();
                     statusBadge.innerText = (data.verdict || "IDLE");
                     statusBadge.style.color = (data.verdict === "PASS" ? "var(--success)" : (data.verdict === "FAIL" ? "var(--danger)" : "var(--text-muted)"));
                 }
@@ -1132,6 +1201,13 @@
         }
 
         // 5. Render Oracle Scorecard
+        function ruleBadge(rule) {
+            const status = rule.status || (rule.passed ? 'PASS' : 'FAIL');
+            if (status === 'NOT_APPLICABLE') return {label:'N/A', css:''};
+            if (status === 'SKIPPED') return {label:'SKIPPED', css:''};
+            return status === 'PASS' ? {label:'PASS', css:'pass'} : {label:'FAIL', css:'fail'};
+        }
+
         function renderOracleScorecard(report) {
             const banner = document.getElementById('scorecardBanner');
             const verdictText = document.getElementById('scorecardVerdictText');
@@ -1145,14 +1221,14 @@
             banner.className = `scorecard-banner ${isPass ? 'pass' : 'fail'}`;
             verdictText.className = `banner-verdict ${isPass ? 'pass' : 'fail'}`;
             verdictText.innerHTML = `<span>${isPass ? '✅ VERIFICATION PASSED' : '❌ VERIFICATION FAILED'}</span>`;
-            subtext.innerText = `Experiment: ${report.experiment} &bull; ${oracle.passed_rules || 0}/${oracle.total_rules || 0} Invariants Satisfied &bull; Recovery Time: ${report.recovery_time_seconds}s`;
-            rulesBadge.innerText = `${oracle.passed_rules || 0}/${oracle.total_rules || 0} Passed`;
+            subtext.innerText = `Experiment: ${report.experiment} · ${oracle.passed_rules || 0}/${oracle.executed_rules ?? oracle.total_rules ?? 0} executed checks passed · ${oracle.skipped_rules || 0} skipped · Recovery: ${report.recovery_time_seconds}s`;
+            rulesBadge.innerText = `${oracle.passed_rules || 0}/${oracle.executed_rules ?? oracle.total_rules ?? 0} executed · ${oracle.skipped_rules || 0} skipped`;
 
             if (oracle.rule_evaluations && oracle.rule_evaluations.length > 0) {
                 tbody.innerHTML = oracle.rule_evaluations.map(r => `
                     <tr>
-                        <td><code>${r.rule}</code></td>
-                        <td><span class="badge-pill ${r.passed ? 'pass' : 'fail'}">${r.passed ? 'PASS' : 'FAIL'}</span></td>
+                        <td><code>${escapeHtml(r.rule)}</code></td>
+                        <td><span class="badge-pill ${ruleBadge(r).css}">${ruleBadge(r).label}</span></td>
                         <td><code>${escapeHtml(String(r.observed))}</code></td>
                         <td><code>${escapeHtml(String(r.expected))}</code></td>
                         <td>${escapeHtml(r.message)}</td>

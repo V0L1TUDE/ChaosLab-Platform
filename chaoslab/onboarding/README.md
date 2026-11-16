@@ -7,6 +7,9 @@ not deploy uploaded code, install an agent, or execute a fault when registering.
 
 ## Run
 
+For repeatable setup, diagnostics, preview startup, and reviewed local execution,
+see [Local development](../LOCAL_DEVELOPMENT.md).
+
 Activate the project's Python environment (Python 3.12, PyYAML installed) and
 from repository root run:
 
@@ -55,8 +58,9 @@ runner, use `PYTHONDONTWRITEBYTECODE=1 python chaoslab/runner.py list`.
 Chaos Mesh compatibility, target scope, fallback cleanup, and current kubectl
 context have been verified. Pod Kill terminates pods; a duration setting does
 not reverse termination. Existing experiment-run API is now disabled by default;
-local test operators can explicitly opt-in with `CHAOSLAB_ENABLE_FAULT_RUNS=1`
-after making those checks. This opt-in is *not* authentication.
+local test operators can explicitly opt-in using
+`python chaoslab/local.py start --enable-fault-runs` after making those checks.
+The launcher pins the cluster; setting an environment flag alone is insufficient. This opt-in is *not* authentication.
 
 ### Unit tests (offline)
 

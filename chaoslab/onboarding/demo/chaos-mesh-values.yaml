@@ -1,0 +1,9 @@
+# Reviewed local Docker Desktop/containerd installation values (chart 2.8.8).
+chaosDaemon:
+  runtime: containerd
+  socketPath: /run/containerd/containerd.sock
+controllerManager:
+  replicaCount: 1
+  enableFilterNamespace: true
+dashboard:
+  create: false

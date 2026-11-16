@@ -7,7 +7,7 @@ Oracle scorecard evaluation, and OpenTelemetry trace inspection directly from th
 """
 
 from datetime import datetime, timezone
-import glob
+import copy
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
 import mimetypes
@@ -35,8 +35,10 @@ for path in [BASE_DIR, CHAOSLAB_DIR, VERIFIER_DIR]:
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from runner import discover_experiments, find_experiment_path
+from runner import discover_experiments
 from payment_verifier import verify_experiment
+from engine import run_experiment
+from dashboard.preflight import check_experiment
 from gate import QualityGate
 from onboarding.registry import ApplicationRegistry, ApplicationError
 
@@ -56,8 +58,9 @@ class ExecutionManager:
         self.error = None
         self.started_at = None
         self.completed_at = None
+        self.worker = None
 
-    def start(self, exp_name: str, exp_path: str):
+    def start(self, exp_name: str, exp_path: str = None, config=None):
         with self.lock:
             if self.running:
                 return False, "An experiment is already in progress."
@@ -73,17 +76,21 @@ class ExecutionManager:
             self.started_at = datetime.now(timezone.utc).isoformat()
             self.completed_at = None
 
-        worker = threading.Thread(target=self._run_worker, args=(exp_path,), daemon=True)
+        worker = threading.Thread(target=self._run_worker, args=(exp_path, copy.deepcopy(config)), daemon=False)
+        self.worker = worker
         worker.start()
         return True, "Experiment launched successfully."
 
-    def _run_worker(self, exp_path: str):
+    def _run_worker(self, exp_path: str, config=None):
         try:
             def on_progress(phase, percent, msg, data=None):
                 with self.lock:
                     self.phase = phase
                     self.percent = percent
                     self.message = msg
+                    if phase == "failed":
+                        self.verdict = "FAIL"
+                        self.error = msg
                     timestamp = datetime.now().strftime("%H:%M:%S")
                     self.logs.append(f"[{timestamp}] {msg}")
                     if len(self.logs) > 300:
@@ -92,7 +99,8 @@ class ExecutionManager:
                         self.report = data
                         self.verdict = data.get("verdict")
 
-            passed = verify_experiment(exp_path, progress_callback=on_progress)
+            passed = (run_experiment(config, progress_callback=on_progress) if config is not None
+                      else verify_experiment(exp_path, progress_callback=on_progress))
             with self.lock:
                 self.running = False
                 self.completed_at = datetime.now(timezone.utc).isoformat()
@@ -106,6 +114,7 @@ class ExecutionManager:
                 self.phase = "failed"
                 self.percent = 100
                 self.error = str(e)
+                self.message = f"Execution failed: {e}"
                 self.verdict = "FAIL"
                 self.logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: {e}")
                 self.completed_at = datetime.now(timezone.utc).isoformat()
@@ -306,11 +315,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def _require_local_origin(self) -> bool:
         """Basic browser cross-site protection, not a substitute for auth."""
+        host = self.headers.get("Host", "")
+        if host.split(":")[0] not in {"localhost", "127.0.0.1"}:
+            return False
         origin = self.headers.get("Origin")
-        if not origin:
-            return True
-        expected = f"http://{self.headers.get('Host', '')}"
-        return origin == expected and self.headers.get("Host", "").split(":")[0] in {"localhost", "127.0.0.1"}
+        return not origin or origin == f"http://{host}"
 
     def _read_registration_json(self) -> Dict[str, Any]:
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
@@ -400,6 +409,14 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self._set_headers(200)
             self.wfile.write(json.dumps({"experiments": exps}).encode("utf-8"))
             return
+
+        if path == "/api/preflight":
+            name = urllib.parse.parse_qs(parsed.query).get("name", [""])[0]
+            summary, _ = check_experiment(name)
+            if _EXECUTION_MANAGER.get_state()["running"]:
+                summary["ready"] = False
+                summary["checks"].append({"name": "Execution slot", "passed": False, "detail": "An experiment is already running."})
+            return self._write_json(200, summary)
 
         # API: Live Execution State
         if path == "/api/execution":
@@ -493,35 +510,27 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/run":
             # Explicit opt-in because the old endpoint lacks authorization.
             if os.environ.get("CHAOSLAB_ENABLE_FAULT_RUNS") != "1":
-                return self._write_json(403, {"error": "Fault execution disabled by default. Use an isolated cluster and set CHAOSLAB_ENABLE_FAULT_RUNS=1 only after verifying the target."})
+                return self._write_json(403, {"error": "Preview mode: fault execution is disabled. Start with python chaoslab/local.py start --enable-fault-runs to permit reviewed local runs."})
             if not self._require_local_origin():
                 return self._write_json(403, {"error": "Cross-origin launch rejected"})
-            content_length = int(self.headers.get("Content-Length", 0))
-            body_bytes = self.rfile.read(content_length) if content_length > 0 else b"{}"
-
             try:
-                body = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
-            except Exception:
-                body = {}
-
-            exp_name = body.get("name") or body.get("experiment")
-            exp_path = None
-
-            if exp_name:
-                exp_path = find_experiment_path(exp_name)
-            else:
-                # Default to payment_kill
-                default_file = os.path.join(EXPERIMENTS_DIR, "payment_kill.yaml")
-                if os.path.exists(default_file):
-                    exp_path = default_file
-                    exp_name = "payment-service-pod-kill"
-
-            if not exp_path or not os.path.exists(exp_path):
-                self._set_headers(400)
-                self.wfile.write(json.dumps({"error": f"Experiment '{exp_name}' could not be resolved."}).encode("utf-8"))
-                return
-
-            started, message = _EXECUTION_MANAGER.start(exp_name, exp_path)
+                body = self._read_registration_json()
+            except ApplicationError as error:
+                return self._write_json(400, {"error": str(error)})
+            exp_name = body.get("name")
+            if not isinstance(exp_name, str) or not exp_name:
+                return self._write_json(400, {"error": "Choose an exact experiment name."})
+            if _EXECUTION_MANAGER.get_state()["running"]:
+                return self._write_json(409, {"error": "An experiment is already running."})
+            summary, config = check_experiment(exp_name)
+            if not summary["ready"]:
+                return self._write_json(409, {"error": "Preflight blocked this run.", "preflight": summary})
+            if (body.get("confirm_target") is not True or not summary["review_token"]
+                    or body.get("review_token") != summary["review_token"]):
+                return self._write_json(409, {"error": "Review the current target and confirm it before running. Configuration changes require a new review.", "preflight": summary})
+            # Execute the configuration that passed fresh checks, never re-read a
+            # mutable draft from disk after the review.
+            started, message = _EXECUTION_MANAGER.start(exp_name, config=config)
             if started:
                 self._set_headers(200)
                 self.wfile.write(json.dumps({
@@ -560,7 +569,12 @@ def run_server(host: str = "127.0.0.1", port: int = 8080):
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down ChaosLab dashboard server...")
+    finally:
         httpd.server_close()
+        worker = _EXECUTION_MANAGER.worker
+        if worker is not None and worker.is_alive():
+            print("Finishing the active experiment and cleanup before shutdown...")
+            worker.join()
 
 if __name__ == "__main__":
     port_arg = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 8080

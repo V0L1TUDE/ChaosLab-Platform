@@ -1,0 +1,2 @@
+# Local launcher, dashboard and verification engine
+PyYAML==6.0.3

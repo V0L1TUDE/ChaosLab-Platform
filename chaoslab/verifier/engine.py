@@ -27,7 +27,7 @@ from reporter import ExperimentReporter
 from telemetry import TelemetryClient
 
 DEFAULT_CONFIG_PATH = os.path.join(".", "chaoslab", "experiments", "payment_kill.yaml")
-REPORTS_DIR = os.path.join(".", "chaoslab", "reports")
+REPORTS_DIR = os.path.join(os.path.dirname(CURRENT_DIR), "reports")
 
 def run_command(command: List[str], input_text: Optional[str] = None, timeout: int = 15) -> subprocess.CompletedProcess:
     """Execute shell command and return CompletedProcess."""
