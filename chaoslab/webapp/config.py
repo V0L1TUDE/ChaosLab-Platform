@@ -68,6 +68,18 @@ S3_PREFIX = _prefix if (not _prefix or _prefix.endswith("/")) else _prefix + "/"
 S3_SSE = os.environ.get("CHAOSLAB_S3_SSE", "AES256").strip()                       # AES256 | aws:kms | none
 S3_KMS_KEY_ID = os.environ.get("CHAOSLAB_S3_KMS_KEY_ID", "").strip()
 
+# Deploying uploaded manifests into per-application sandbox namespaces (needs a reachable cluster).
+DEPLOY_ENABLED = _env_bool("CHAOSLAB_DEPLOY_ENABLED", _env_bool("CHAOSLAB_LIVE_ENABLED", True))
+DEPLOY_TTL_MINUTES = _env_int("CHAOSLAB_DEPLOY_TTL_MINUTES", 120)        # auto-undeploy after this long
+DEPLOY_TIMEOUT_SECONDS = _env_int("CHAOSLAB_DEPLOY_TIMEOUT_SECONDS", 180)
+MAX_DEPLOYED_PER_USER = _env_int("CHAOSLAB_MAX_DEPLOYED_PER_USER", 2)
+MAX_DEPLOYED_TOTAL = _env_int("CHAOSLAB_MAX_DEPLOYED_TOTAL", 6)
+MAX_REPLICAS = _env_int("CHAOSLAB_MAX_REPLICAS", 3)
+# Registries uploaded images may come from (comma separated). Bare names like `nginx:1.27` mean docker.io.
+ALLOWED_REGISTRIES = tuple(r.strip().lower() for r in os.environ.get(
+    "CHAOSLAB_ALLOWED_REGISTRIES",
+    "docker.io,ghcr.io,gcr.io,quay.io,registry.k8s.io,public.ecr.aws,mcr.microsoft.com").split(",") if r.strip())
+
 # Cluster service discovery (read-only `kubectl get deployments`); falls back to a static list.
 DISCOVERY_ENABLED = _env_bool("CHAOSLAB_DISCOVERY_ENABLED", True)
 

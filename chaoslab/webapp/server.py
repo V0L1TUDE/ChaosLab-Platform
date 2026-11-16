@@ -45,6 +45,8 @@ def main(argv=None) -> None:
     db.init_db()
     load_routes()
     run_startup_hooks()
+    from . import deployments
+    deployments.start_reaper()
 
     httpd = create_server(args.host, args.port)
     print("=" * 78)

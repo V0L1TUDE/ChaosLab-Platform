@@ -38,9 +38,12 @@ def capabilities() -> Dict[str, Any]:
 
 def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any, duration: Any, mode: Any) -> int:
     global _live_active
-    app = catalog.get_builtin(app_row["slug"])
+    app = catalog.resolve_app(app_row)
     if not app:
-        raise ExperimentRejected("Experiments can only be run against the built-in demo applications in this MVP.", 400)
+        raise ExperimentRejected("This application cannot run experiments. Upload valid Kubernetes manifests "
+                                 "or use a built-in demo application.", 400)
+    if app.get("uploaded") and mode == "live" and app_row["status"] != "deployed":
+        raise ExperimentRejected("Deploy the application first: Live experiments need it running in the cluster.", 409)
     if mode not in BACKENDS:
         raise ExperimentRejected("mode must be 'live' or 'simulated'.")
     try:

@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from . import config, db
+from . import config, db, k8s_deploy
 
 DISCOVERY_TTL_SECONDS = 10
 
@@ -109,6 +109,24 @@ def get_builtin(slug: Optional[str]) -> Optional[Dict[str, Any]]:
     return _APP_BY_SLUG.get(slug) if slug else None
 
 
+def resolve_app(row) -> Optional[Dict[str, Any]]:
+    """
+    Catalog entry for an applications row: a built-in app, or a user's validated manifest upload (whose
+    namespace is its sandbox namespace and whose services come from the validated Deployments).
+    None for apps that cannot run experiments (plain registrations, invalid manifests).
+    """
+    if row["slug"]:
+        return get_builtin(row["slug"])
+    if not row["manifest_json"] or not row["validation_json"]:
+        return None
+    workloads = json.loads(row["validation_json"]).get("workloads", [])
+    services = [(w.get("app") or w["name"], (w["images"][0].rsplit("/", 1)[-1] if w.get("images") else "container"),
+                 "unknown", "Uploaded workload: " + ", ".join(w.get("images") or [])) for w in workloads]
+    return {"slug": None, "id": row["id"], "name": row["name"], "description": row["description"],
+            "namespace": k8s_deploy.namespace_for(row["id"]), "static_services": services,
+            "uploaded": True, "deployed": row["status"] == "deployed", "status": row["status"]}
+
+
 # ----------------------------------------------------------------------------- discovery
 _cache: Dict[str, Any] = {"at": 0.0, "data": None}
 _cache_lock = threading.Lock()
@@ -165,6 +183,9 @@ def discover_services(app: Dict[str, Any], force: bool = False) -> Dict[str, Any
     with the reason). Cluster services missing from the static table still appear (metadata unknown).
     """
     meta = {t[0]: t for t in app["static_services"]}
+    if app.get("uploaded") and not app.get("deployed"):
+        return {"source": "static", "discovered_at": db.utcnow(), "error": "Application is not deployed to the cluster.",
+                "services": [_static_service(app, t) for t in app["static_services"]]}
     snap = _cluster_snapshot(force)
     deployments = snap["namespaces"].get(app["namespace"]) if snap["ok"] else None
     if deployments:
@@ -221,7 +242,7 @@ def curated_experiments(namespace: str) -> List[Dict[str, Any]]:
 def describe_app(app: Dict[str, Any], force: bool = False) -> Dict[str, Any]:
     disc = discover_services(app, force)
     return {
-        "slug": app["slug"], "namespace": app["namespace"],
+        "slug": app.get("slug"), "namespace": app["namespace"],
         "services": disc["services"], "services_count": len(disc["services"]),
         "targetable_services": [s["name"] for s in disc["services"] if s["targetable"]],
         "discovery": {"source": disc["source"], "discovered_at": disc["discovered_at"], "error": disc["error"]},
