@@ -79,6 +79,33 @@ modes), `verifier/reporter.py` (Live runs also expose the engine's native HTML r
 the curated experiment YAMLs in `experiments/` (their application/telemetry probes are used for Live runs of
 the matching service+fault), and the Online Boutique deployment as the demo application.
 
+### Bring your own cluster: the ChaosLab agent
+Users connect THEIR cluster instead of letting this server run workloads. Full guide: [`../agent/README.md`](../agent/README.md).
+
+```
+browser ──▶ web app (users, apps, jobs, Oracle, reports)  ◀── HTTPS, outbound only ──  agent  ──kubectl──▶ customer cluster
+```
+1. **Connect**: Clusters → name it → a one-time enrollment token (single use, 60 min, hashed at rest). Start the agent with it
+   (`python agent.py --server URL --token cle_… --allowed-namespaces ns1,ns2`). The agent swaps it for a revocable credential and
+   reports its cluster identity (kube-system UID, one account per cluster), allowed namespaces and the Deployments in them.
+2. **Register targets explicitly**: an application = (cluster, namespace) and only for namespaces the agent allows. Services come from the
+   agent's inventory (datastores etc. are not targetable). Nothing else can be targeted.
+3. **Run**: Live experiments on such apps become a **job**. The agent long-polls, leases it (one active job per cluster), re-validates it
+   against its own local policy, runs the existing engine, and streams events and samples. It returns raw **evidence**; the server evaluates
+   it with its own Oracle (a differing agent verdict is noted, never trusted). Simulated mode works without the agent.
+4. **Control**: per-cluster **Emergency stop** (cancels queued jobs, makes the agent delete the running fault within seconds, blocks new jobs
+   until Resume; enqueue is refused while paused, closing the stop-vs-enqueue race), token regeneration, removal (history kept), and an
+   append-only **audit log** (enrollment, registrations, job lifecycle, stops, rejected/mismatched credentials).
+
+Agent API (Bearer auth, outbound from the agent): `POST /agent/v1/enroll`, `/agent/v1/poll` (heartbeat + inventory in, job/cancel/paused out),
+`/agent/v1/jobs/{id}/events`, `/agent/v1/jobs/{id}/result`. Credentials: enrollment token `cle_…` (one-time) → agent credential `cla_…`
+→ per-job token `clj_…` (valid only for that job until its lease expires). Enrollment attempts are throttled per IP.
+User API: `GET/POST /api/clusters`, `GET/DELETE /api/clusters/{id}`, `POST /api/clusters/{id}/{enrollment|emergency-stop|resume|applications}`.
+Extra tables: `clusters`, `jobs`, `audit_log`; `applications.cluster_id`, `experiments.cluster_id`.
+Env: `CHAOSLAB_PUBLIC_URL` (shown in install commands), `CHAOSLAB_AGENT_ONLINE_SECONDS` (45), `CHAOSLAB_AGENT_QUEUE_TIMEOUT_SECONDS` (120),
+`CHAOSLAB_ENROLL_TTL_MINUTES` (60), `CHAOSLAB_MAX_CLUSTERS_PER_USER` (5). **Serve the app over HTTPS in production** (agents refuse plain
+HTTP to non-local servers) and set `CHAOSLAB_COOKIE_SECURE=true`.
+
 ### Uploaded applications: validate, deploy, test (strict sandbox)
 Upload Kubernetes manifests (a `.yaml`, or a `.zip` containing `.yaml` files; see `examples/hello-two-tier.yaml`).
 
@@ -199,6 +226,9 @@ mode for the curated experiments that configure probes (e.g. `paymentservice` po
 `N/A` otherwise. Simulated runs evaluate all groups on predefined evidence (still `N/A` for `target_impact` on network faults).
 
 ## Remaining limitations
+* Customer clusters (agent): infrastructure invariants only (application/telemetry are N/A: probes can carry commands, so the agent
+  never runs them), one experiment per cluster, and evidence is only as trustworthy as the agent the customer runs. No agent auto-update,
+  no mTLS/key pinning yet, and the control plane is a single process (SQLite + threads).
 * Uploaded apps must be Kubernetes manifests (Deployment/Service/ConfigMap with registry images): no Secrets, volumes beyond
   emptyDir/ConfigMap, Ingress, StatefulSets, init containers, or building from source. Application/telemetry invariants are N/A for them.
 * The sandbox shares the cluster's nodes and kernel (namespace + admission + quota + network policy isolation, not a VM boundary);

@@ -80,6 +80,14 @@ ALLOWED_REGISTRIES = tuple(r.strip().lower() for r in os.environ.get(
     "CHAOSLAB_ALLOWED_REGISTRIES",
     "docker.io,ghcr.io,gcr.io,quay.io,registry.k8s.io,public.ecr.aws,mcr.microsoft.com").split(",") if r.strip())
 
+# Connected customer clusters (ChaosLab agent, "bring your own cluster")
+AGENT_ONLINE_SECONDS = _env_int("CHAOSLAB_AGENT_ONLINE_SECONDS", 45)           # offline if no poll within this
+AGENT_QUEUE_TIMEOUT_SECONDS = _env_int("CHAOSLAB_AGENT_QUEUE_TIMEOUT_SECONDS", 120)
+ENROLL_TTL_MINUTES = _env_int("CHAOSLAB_ENROLL_TTL_MINUTES", 60)
+MAX_CLUSTERS_PER_USER = _env_int("CHAOSLAB_MAX_CLUSTERS_PER_USER", 5)
+AGENT_MAX_WAIT_SECONDS = 25                                                     # long-poll ceiling
+PUBLIC_URL = os.environ.get("CHAOSLAB_PUBLIC_URL", "").strip().rstrip("/")      # shown in agent install commands
+
 # Cluster service discovery (read-only `kubectl get deployments`); falls back to a static list.
 DISCOVERY_ENABLED = _env_bool("CHAOSLAB_DISCOVERY_ENABLED", True)
 

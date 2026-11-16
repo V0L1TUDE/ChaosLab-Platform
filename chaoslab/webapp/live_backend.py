@@ -126,10 +126,10 @@ class LiveBackend(ExecutionBackend):
         report = state["report"]
         if not report:
             raise ExecutionError(state["failure"] or "The engine finished without producing a result.")
-        return self._to_result(spec, sink, report)
+        return self.build_result(spec, sink.stage_times, report, DATA_SOURCE_LIVE)
 
     @staticmethod
-    def _to_result(spec, sink, report: Dict[str, Any]) -> Dict[str, Any]:
+    def build_result(spec, stage_times: Dict[str, str], report: Dict[str, Any], data_source: str) -> Dict[str, Any]:
         # Stage timestamps recorded while the engine ran; engine-reported evidence timestamps add precision.
         ts = report.get("timestamps", {})
         detail = {
@@ -137,7 +137,7 @@ class LiveBackend(ExecutionBackend):
             "impact": f"Original pod gone at {ts['original_pod_disappeared']}" if ts.get("original_pod_disappeared") else None,
             "recovery": f"Replacement Ready at {ts['replacement_ready']}" if ts.get("replacement_ready") else None,
         }
-        timeline = stage_timeline(sink.stage_times, detail)
+        timeline = stage_timeline(stage_times, detail)
         is_network = "network" in str(report.get("fault", "")).lower()
         notes = ["Collected live from the ChaosLab engine. Latency series are only available when "
                  "Jaeger telemetry is enabled for the experiment."]
@@ -150,7 +150,7 @@ class LiveBackend(ExecutionBackend):
         baseline = report.get("baseline", {})
         return build_result_common(
             simulated=False,
-            data_source=DATA_SOURCE_LIVE,
+            data_source=data_source,
             spec=spec,
             timeline=timeline,
             health={

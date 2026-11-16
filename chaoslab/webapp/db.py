@@ -31,6 +31,56 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 -- user_id is NULL for built-in applications (visible to every user, never deletable).
+CREATE TABLE IF NOT EXISTS clusters (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name               TEXT    NOT NULL,
+    status             TEXT    NOT NULL DEFAULT 'pending',   -- pending | connected | revoked
+    paused             INTEGER NOT NULL DEFAULT 0,           -- emergency stop
+    enroll_token_hash  TEXT,
+    enroll_expires_at  TEXT,
+    credential_hash    TEXT UNIQUE,
+    cluster_uid        TEXT,                                 -- kube-system namespace UID: one account per cluster
+    kube_version       TEXT,
+    agent_version      TEXT,
+    allowed_namespaces TEXT,                                 -- JSON list, reported by the agent (its local allow-list)
+    inventory_json     TEXT,                                 -- agent-reported deployments per allowed namespace
+    inventory_at       TEXT,
+    last_seen          TEXT,
+    created_at         TEXT    NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clusters_uid ON clusters(cluster_uid) WHERE cluster_uid IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_id    INTEGER NOT NULL REFERENCES experiments(id) ON DELETE CASCADE,
+    cluster_id       INTEGER NOT NULL REFERENCES clusters(id),
+    status           TEXT    NOT NULL,       -- queued | leased | running | done | failed | cancelled | expired
+    spec_json        TEXT    NOT NULL,
+    job_token_hash   TEXT,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    result_json      TEXT,
+    error            TEXT,
+    created_at       TEXT    NOT NULL,
+    leased_at        TEXT,
+    lease_expires_at TEXT,
+    started_at       TEXT,
+    finished_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_cluster ON jobs(cluster_id, status);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts         TEXT    NOT NULL,
+    user_id    INTEGER,
+    cluster_id INTEGER,
+    actor      TEXT    NOT NULL,        -- user | agent | system
+    action     TEXT    NOT NULL,
+    detail     TEXT    NOT NULL DEFAULT '',
+    ip         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_cluster ON audit_log(cluster_id, id DESC);
+
 CREATE TABLE IF NOT EXISTS applications (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id           INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -48,6 +98,7 @@ CREATE TABLE IF NOT EXISTS applications (
     namespace         TEXT,                   -- sandbox namespace while deployed
     deployed_at       TEXT,
     deploy_error      TEXT,
+    cluster_id        INTEGER REFERENCES clusters(id),   -- set for applications living in a connected cluster
     created_at        TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_applications_user ON applications(user_id);
@@ -70,7 +121,8 @@ CREATE TABLE IF NOT EXISTS experiments (
     result_json      TEXT,                    -- normalized result (timeline, metrics, oracle)
     created_at       TEXT    NOT NULL,
     started_at       TEXT,
-    completed_at     TEXT
+    completed_at     TEXT,
+    cluster_id       INTEGER REFERENCES clusters(id)          -- set when executed by a connected cluster's agent
 );
 CREATE INDEX IF NOT EXISTS idx_experiments_user ON experiments(user_id, id DESC);
 
@@ -138,3 +190,8 @@ def init_db() -> None:
         for col in ("manifest_json", "validation_json", "namespace", "deployed_at", "deploy_error"):
             if col not in cols:
                 conn.execute(f"ALTER TABLE applications ADD COLUMN {col} TEXT")
+        if "cluster_id" not in cols:
+            conn.execute("ALTER TABLE applications ADD COLUMN cluster_id INTEGER REFERENCES clusters(id)")
+        exp_cols = {r["name"] for r in conn.execute("PRAGMA table_info(experiments)")}
+        if "cluster_id" not in exp_cols:
+            conn.execute("ALTER TABLE experiments ADD COLUMN cluster_id INTEGER REFERENCES clusters(id)")

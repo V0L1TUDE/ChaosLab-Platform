@@ -13,10 +13,12 @@ from typing import Any, Dict, Optional
 
 from . import catalog, config, db, reports
 from .execution import ExecutionBackend, ExecutionError, ProgressSink
+from .agent_backend import AgentBackend
 from .live_backend import LiveBackend, live_capability
 from .sim_backend import SimulatedBackend
 
-BACKENDS: Dict[str, ExecutionBackend] = {"live": LiveBackend(), "simulated": SimulatedBackend()}
+BACKENDS: Dict[str, ExecutionBackend] = {"live": LiveBackend(), "simulated": SimulatedBackend(), "agent": AgentBackend()}
+_USER_MODES = ("live", "simulated")
 
 _live_lock = threading.Lock()
 _live_active = False
@@ -44,14 +46,21 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
                                  "or use a built-in demo application.", 400)
     if app.get("uploaded") and mode == "live" and app_row["status"] != "deployed":
         raise ExperimentRejected("Deploy the application first: Live experiments need it running in the cluster.", 409)
-    if mode not in BACKENDS:
+    if mode not in _USER_MODES:
         raise ExperimentRejected("mode must be 'live' or 'simulated'.")
+    cluster_id = app.get("cluster_id")
     try:
         duration = catalog.validate_selection(app, service, fault_id, duration)
     except ValueError as e:
         raise ExperimentRejected(str(e))
 
-    if mode == "live":
+    if mode == "live" and cluster_id:
+        # Customer cluster: executed by that cluster's agent, never by this server's own kubectl.
+        if app["cluster_paused"]:
+            raise ExperimentRejected("Emergency stop is active for this cluster. Resume it first.", 409)
+        if not app["cluster_online"]:
+            raise ExperimentRejected("The ChaosLab agent for this cluster is offline. Start it and try again.", 503)
+    elif mode == "live":
         cap = live_capability()
         if not cap["available"]:
             raise ExperimentRejected(f"Live execution is unavailable: {cap['reason']}", 503)
@@ -61,13 +70,19 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
                 f"Live execution is unavailable: {app['name']} was not found in the cluster ({disc['error']}).", 503)
 
     with db.session() as conn:
+        conn.execute("BEGIN IMMEDIATE")      # take the write lock first: the checks below must be atomic with the INSERT
+        if cluster_id and mode == "live":
+            busy = conn.execute("SELECT COUNT(*) FROM experiments WHERE cluster_id = ? AND status IN ('pending', 'running')",
+                                (cluster_id,)).fetchone()[0]
+            if busy:
+                raise ExperimentRejected("Another experiment is already running on this cluster.", 409)
         active = conn.execute(
             "SELECT COUNT(*) FROM experiments WHERE user_id = ? AND status IN ('pending', 'running')", (user["id"],)
         ).fetchone()[0]
         if active >= config.MAX_ACTIVE_EXPERIMENTS_PER_USER:
             raise ExperimentRejected("Too many experiments are already running. Wait for one to finish.", 429)
 
-        if mode == "live":
+        if mode == "live" and not cluster_id:
             with _live_lock:
                 if _live_active:
                     raise ExperimentRejected("Another live experiment is running against the shared cluster. Try again shortly.", 409)
@@ -76,9 +91,10 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
         try:
             cur = conn.execute(
                 "INSERT INTO experiments (user_id, application_id, target_service, fault_type, duration_seconds, "
-                "config_json, mode, status, current_stage, percent, created_at) "
-                "VALUES (?, ?, ?, ?, ?, '{}', ?, 'pending', 'pending', 0, ?)",
-                (user["id"], app_row["id"], service, fault_id, duration, mode, db.utcnow()),
+                "config_json, mode, status, current_stage, percent, created_at, cluster_id) "
+                "VALUES (?, ?, ?, ?, ?, '{}', ?, 'pending', 'pending', 0, ?, ?)",
+                (user["id"], app_row["id"], service, fault_id, duration, mode, db.utcnow(),
+                 cluster_id if mode == "live" else None),
             )
             exp_id = cur.lastrowid
             engine_config = catalog.build_engine_config(
@@ -91,13 +107,14 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
                              "namespace": app["namespace"], "engine_config": engine_config}), exp_id),
             )
         except Exception:
-            if mode == "live":
+            if mode == "live" and not cluster_id:
                 with _live_lock:
                     _live_active = False
             raise
 
     spec = {"experiment_id": exp_id, "user_id": user["id"], "service": service, "fault_id": fault_id,
-            "duration": duration, "engine_config": engine_config}
+            "duration": duration, "engine_config": engine_config,
+            "cluster_id": cluster_id if mode == "live" else None}
     threading.Thread(target=_worker, args=(spec, mode), daemon=True, name=f"experiment-{exp_id}").start()
     return exp_id
 
@@ -111,36 +128,49 @@ def _fail(exp_id: int, message: str) -> None:
 
 
 def _worker(spec: Dict[str, Any], mode: str) -> None:
+    """
+    Runs one experiment. The final status flip happens only AFTER the reports exist, so a client that sees
+    `completed`/`failed` always finds its reports.
+    """
     global _live_active
     exp_id = spec["experiment_id"]
     sink = ProgressSink(exp_id, simulated=(mode == "simulated"))
+    final: Dict[str, Any] = {"status": "failed", "error": "Unknown failure."}
     try:
         with db.session() as conn:
             conn.execute("UPDATE experiments SET status = 'running', started_at = ? WHERE id = ?", (db.utcnow(), exp_id))
-        result = BACKENDS[mode].run(spec, sink)
+        backend = BACKENDS["agent"] if (mode == "live" and spec.get("cluster_id")) else BACKENDS[mode]
+        result = backend.run(spec, sink)
         result["metrics"]["series"] = load_samples(exp_id)
         oracle = result.get("oracle") or {}
         with db.session() as conn:
             conn.execute(
-                "UPDATE experiments SET status = 'completed', current_stage = 'completed', percent = 100, "
-                "oracle_verdict = ?, recovery_seconds = ?, result_json = ?, completed_at = ? WHERE id = ?",
-                (oracle.get("verdict"), result["metrics"].get("recovery_seconds"), json.dumps(result), db.utcnow(), exp_id),
-            )
+                "UPDATE experiments SET current_stage = 'completed', percent = 100, oracle_verdict = ?, "
+                "recovery_seconds = ?, result_json = ? WHERE id = ?",
+                (oracle.get("verdict"), result["metrics"].get("recovery_seconds"), json.dumps(result), exp_id))
+        final = {"status": "completed", "error": None}
     except ExecutionError as e:
         sink.event("failed", str(e), "error")
-        _fail(exp_id, str(e))
+        final = {"status": "failed", "error": str(e)[:1000]}
     except Exception as e:  # never leave an experiment stuck in 'running'
         traceback.print_exc()
         sink.event("failed", f"Unexpected internal error: {type(e).__name__}", "error")
-        _fail(exp_id, f"Unexpected internal error: {type(e).__name__}")
+        final = {"status": "failed", "error": f"Unexpected internal error: {type(e).__name__}"}
     finally:
-        if mode == "live":
+        if mode == "live" and not spec.get("cluster_id"):
             with _live_lock:
                 _live_active = False
+        completed_at = db.utcnow()
         try:
-            reports.generate(exp_id)
+            reports.generate(exp_id, {**final, "completed_at": completed_at})
         except Exception:
             traceback.print_exc()
+        with db.session() as conn:
+            if final["status"] == "completed":
+                conn.execute("UPDATE experiments SET status = 'completed', completed_at = ? WHERE id = ?", (completed_at, exp_id))
+            else:
+                conn.execute("UPDATE experiments SET status = 'failed', current_stage = 'failed', error = ?, completed_at = ? WHERE id = ?",
+                             (final["error"], completed_at, exp_id))
 
 
 def load_samples(exp_id: int):
@@ -176,6 +206,10 @@ def experiment_summary(row) -> Dict[str, Any]:
 def experiment_detail(conn, row, after_event: int = 0) -> Dict[str, Any]:
     d = experiment_summary(row)
     d["application_name"] = conn.execute("SELECT name FROM applications WHERE id = ?", (row["application_id"],)).fetchone()[0]
+    d["cluster"] = None
+    if row["cluster_id"]:
+        c = conn.execute("SELECT id, name FROM clusters WHERE id = ?", (row["cluster_id"],)).fetchone()
+        d["cluster"] = {"id": c["id"], "name": c["name"]} if c else None
     cfg = json.loads(row["config_json"] or "{}")
     d["config"] = {k: v for k, v in cfg.items() if k != "engine_config"}
     d["engine_config"] = cfg.get("engine_config")

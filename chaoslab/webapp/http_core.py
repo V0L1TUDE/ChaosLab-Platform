@@ -21,6 +21,7 @@ import urllib.parse
 from . import auth, config
 
 JSON_BODY_LIMIT = 256 * 1024
+AGENT_BODY_LIMIT = 1024 * 1024        # agent evidence payloads
 
 
 class HttpError(Exception):
@@ -38,6 +39,7 @@ class Request:
         self.headers = headers
         self.body = body
         self.params: Dict[str, str] = {}
+        self.ip: Optional[str] = None
         self.user: Optional[Dict[str, Any]] = None
         self.token: Optional[str] = None
 
@@ -176,7 +178,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(self._static("/"))  # SPA fallback
 
             self._check_origin(method)
-            body = self._read_body(method)
+            body = self._read_body(method, path)
             req = Request(method, path, urllib.parse.parse_qs(parsed.query), self.headers, body)
 
             resolved = router.resolve(method, path)
@@ -184,6 +186,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(404, "Endpoint not found.")
             handler, auth_required, params = resolved
             req.params = params
+            req.ip = self.client_address[0]
 
             cookies = SimpleCookie(self.headers.get("Cookie") or "")
             req.token = cookies[config.SESSION_COOKIE].value if config.SESSION_COOKIE in cookies else None
@@ -211,7 +214,7 @@ class Handler(BaseHTTPRequestHandler):
                 if host != self.headers.get("Host"):
                     raise HttpError(403, "Cross-origin request rejected.")
 
-    def _read_body(self, method: str) -> bytes:
+    def _read_body(self, method: str, path: str = "") -> bytes:
         if method not in ("POST", "PUT", "PATCH"):
             return b""
         try:
@@ -219,7 +222,8 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             raise HttpError(400, "Invalid Content-Length.")
         ctype = (self.headers.get("Content-Type") or "").lower()
-        limit = config.MAX_UPLOAD_BYTES + 1024 * 1024 if ctype.startswith("multipart/") else JSON_BODY_LIMIT
+        limit = config.MAX_UPLOAD_BYTES + 1024 * 1024 if ctype.startswith("multipart/") else (
+            AGENT_BODY_LIMIT if path.startswith("/agent/") else JSON_BODY_LIMIT)
         if length < 0:
             raise HttpError(400, "Invalid Content-Length.")
         if length > limit:
