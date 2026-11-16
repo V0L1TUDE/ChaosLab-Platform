@@ -40,7 +40,7 @@ from payment_verifier import verify_experiment
 from engine import run_experiment
 from dashboard.preflight import check_experiment
 from gate import QualityGate
-from onboarding.registry import ApplicationRegistry, ApplicationError
+from onboarding.registry import ApplicationRegistry, ApplicationError, allowed_namespaces
 
 class ExecutionManager:
     """Thread-safe state manager for asynchronous experiment execution and progress tracking."""
@@ -377,6 +377,36 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/onboarding/apps":
             return self._write_json(200, {"applications": ApplicationRegistry().list_apps()})
+
+        if path == "/api/onboarding/labels":
+            namespace = urllib.parse.parse_qs(parsed.query).get("namespace", [""])[0]
+            if namespace not in allowed_namespaces():
+                return self._write_json(400, {"error": "Namespace is not approved for onboarding"})
+            try:
+                proc = subprocess.run(["kubectl", "get", "pods", "-n", namespace, "-o", "json",
+                                       "--request-timeout=6s"], capture_output=True, text=True,
+                                      timeout=10, check=False)
+                if proc.returncode:
+                    return self._write_json(200, {"connected": False, "options": [],
+                                                  "error": proc.stderr.strip()[:300] or "Kubernetes query failed"})
+                items = json.loads(proc.stdout).get("items", [])
+                options = {}
+                for pod in items:
+                    labels = pod.get("metadata", {}).get("labels", {})
+                    value = labels.get("app")
+                    if value:
+                        entry = options.setdefault(value, {"value": value, "pods": 0, "ready": 0})
+                        entry["pods"] += 1
+                        status = pod.get("status", {})
+                        if status.get("phase") == "Running" and any(
+                                c.get("type") == "Ready" and c.get("status") == "True"
+                                for c in status.get("conditions", [])):
+                            entry["ready"] += 1
+                return self._write_json(200, {"connected": True,
+                                              "options": sorted(options.values(), key=lambda x: x["value"])})
+            except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, TypeError):
+                return self._write_json(200, {"connected": False, "options": [],
+                                              "error": "Could not read app labels from this namespace"})
 
         status_match = re.fullmatch(r"/api/onboarding/apps/([0-9a-f]{12})/pods", path)
         if status_match:
