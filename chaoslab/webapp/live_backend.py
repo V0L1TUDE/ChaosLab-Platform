@@ -130,16 +130,14 @@ class LiveBackend(ExecutionBackend):
 
     @staticmethod
     def _to_result(spec, sink, report: Dict[str, Any]) -> Dict[str, Any]:
+        # Stage timestamps recorded while the engine ran; engine-reported evidence timestamps add precision.
         ts = report.get("timestamps", {})
-        labels = {
-            "experiment_start": ("baseline", "Baseline"),
-            "fault_injected": ("fault_injection", "Fault injection"),
-            "original_pod_disappeared": ("impact", "Service impact"),
-            "replacement_ready": ("recovery", "Recovery"),
-            "experiment_end": ("completed", "Completed"),
+        detail = {
+            "fault_injection": f"Chaos Mesh fault applied at {ts['fault_injected']}" if ts.get("fault_injected") else None,
+            "impact": f"Original pod gone at {ts['original_pod_disappeared']}" if ts.get("original_pod_disappeared") else None,
+            "recovery": f"Replacement Ready at {ts['replacement_ready']}" if ts.get("replacement_ready") else None,
         }
-        timeline = [{"key": k, "label": l, "at": ts[src], "detail": None}
-                    for src, (k, l) in labels.items() if ts.get(src)]
+        timeline = stage_timeline(sink.stage_times, detail)
         tel = report.get("telemetry") or {}
         lat = tel.get("latency_ms") or {}
         baseline = report.get("baseline", {})
@@ -147,7 +145,7 @@ class LiveBackend(ExecutionBackend):
             simulated=False,
             data_source=DATA_SOURCE_LIVE,
             spec=spec,
-            timeline=timeline or stage_timeline(sink.stage_times),
+            timeline=timeline,
             health={
                 "baseline_ready": baseline.get("ready_replicas"),
                 "min_ready_during_fault": None,

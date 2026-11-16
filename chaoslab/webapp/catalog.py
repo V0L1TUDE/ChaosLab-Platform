@@ -180,6 +180,10 @@ def build_engine_config(service: str, fault_id: str, duration: int, run_name: st
         }
         cfg["telemetry"] = {"enabled": True, "service_name": service, "verify_error_spike": True, "max_allowed_p95_ms": 1000}
     else:
-        cfg.setdefault("application", {"enabled": False})
-        cfg.setdefault("telemetry", {"enabled": False})
+        # Curated YAMLs may nest these under `verification` (legacy schema); only default when absent in both.
+        verification = cfg.get("verification") or {}
+        if "application" not in cfg and "application" not in verification:
+            cfg["application"] = {"enabled": False}
+        if "telemetry" not in cfg and "telemetry" not in verification:
+            cfg["telemetry"] = {"enabled": False}
     return cfg
