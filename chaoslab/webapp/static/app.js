@@ -719,6 +719,8 @@ function enrollPanel(c, e) {
     <div class="banner info"><div>This token is shown <b>once</b> and works <b>once</b> (expires ${fmtTime(e.expires_at)}). The agent exchanges it for a revocable credential. It makes outbound calls only: nothing connects in to your cluster.</div></div>
     <div class="field"><label>Namespaces the agent is allowed to test (comma separated). The agent enforces this list itself.</label>
       <input type="text" id="enroll-ns" value="default" data-server="${e.server_url}" data-token="${e.token}" data-ca="${e.ca_url ? '1' : ''}"></div>
+    <div class="field"><label>Jaeger query service for tracing checks (optional, NAMESPACE/SERVICE:PORT). Leave empty if you don't use Jaeger.</label>
+      <input type="text" id="enroll-jaeger" placeholder="default/jaeger:16686"></div>
     ${e.ca_url ? h`<div class="banner info"><div>This server uses a self-signed certificate. First download <a href="${e.ca_url}" download>chaoslab-ca.crt</a> into the <code>chaoslab/agent</code> folder; the command below tells the agent to trust exactly that certificate.</div></div>` : ''}
     <label>Run on a machine (or pod) where <code>kubectl</code> can reach your cluster, from <code>chaoslab/agent</code>:</label>
     <pre class="log" id="enroll-cmd" style="white-space:pre-wrap;word-break:break-all">${cmd('default')}</pre>
@@ -825,10 +827,14 @@ document.addEventListener('change', ev => {
 });
 
 document.addEventListener('input', ev => {
-  if (ev.target.id === 'enroll-ns') {
-    const ns = ev.target.value.replace(/\s+/g, '') || 'default';
+  if (ev.target.id === 'enroll-ns' || ev.target.id === 'enroll-jaeger') {
+    const nsEl = document.getElementById('enroll-ns');
+    const ns = nsEl.value.replace(/\s+/g, '') || 'default';
+    const jaeger = (document.getElementById('enroll-jaeger').value || '').trim();
+    const jaegerOk = /^[a-z0-9-]+\/[a-z0-9-]+:\d{1,5}$/.test(jaeger);
     document.getElementById('enroll-cmd').textContent =
-      `python agent.py --server ${ev.target.dataset.server} --token ${ev.target.dataset.token} --allowed-namespaces ${ns}${ev.target.dataset.ca ? ' --ca-cert chaoslab-ca.crt' : ''}`;
+      `python agent.py --server ${nsEl.dataset.server} --token ${nsEl.dataset.token} --allowed-namespaces ${ns}` +
+      `${jaegerOk ? ' --jaeger ' + jaeger : ''}${nsEl.dataset.ca ? ' --ca-cert chaoslab-ca.crt' : ''}`;
   }
 });
 
