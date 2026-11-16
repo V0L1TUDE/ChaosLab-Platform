@@ -471,3 +471,18 @@ class ServerProbeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WrongPortMessageTests(unittest.TestCase):
+    def test_wrong_port_says_so_in_plain_words(self):
+        import socket
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); closed_port = s.getsockname()[1]; s.close()   # nothing listens here
+
+        class ToClosedPort(FakeForward):
+            def __enter__(self):
+                return closed_port
+        r = safe_probes.probe_http({"port": 8002, "path": "/health", "expected_status": 200}, "project-platform",
+                                   "pm-frontend-abc", ToClosedPort)
+        self.assertFalse(r["passed"])
+        self.assertIn("Is the application listening on port 8002?", r["detail"])
+        self.assertIn("kubectl get pod pm-frontend-abc -n project-platform", r["detail"])

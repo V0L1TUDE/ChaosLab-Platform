@@ -179,6 +179,11 @@ def probe_http(spec: Dict[str, Any], namespace: str, pod: str, forward_factory: 
     except ProbeError as e:
         return {"passed": False, "status": "UNREACHABLE", "detail": str(e)}
     passed, detail = _check(spec, result)
+    if "error" in result:
+        # The forward worked but nothing answered HTTP: almost always the wrong port (or not an HTTP server).
+        detail = (f"no HTTP response from port {spec['port']} of pod {pod} ({result['error'][:80]}). "
+                  f"Is the application listening on port {spec['port']}? Check the container ports with: "
+                  f"kubectl get pod {pod} -n {namespace} -o jsonpath='{{.spec.containers[*].ports[*].containerPort}}'")
     return {"passed": passed, "status_code": result.get("status"), "latency_ms": result.get("latency_ms"),
             "status": f"{result['status']} OK" if passed else (f"HTTP {result['status']}" if "status" in result else "UNREACHABLE"),
             "detail": detail, "path": spec["path"], "port": spec["port"]}

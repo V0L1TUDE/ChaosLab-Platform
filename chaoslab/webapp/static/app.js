@@ -522,7 +522,7 @@ async function pageMonitor(id) {
     const r = e.result, m = r ? r.metrics : null;
     const running = e.status === 'running' || e.status === 'pending';
 
-    let health = '<span class="faint">waiting for first sample…</span>', recovery = 'Not started';
+    let health = raw('<span class="faint">waiting for first sample…</span>'), recovery = 'Not started';
     if (last) {
       const ok = last.replicas_ready >= 1;
       health = h`<span class="badge ${ok ? 'b-completed' : 'b-failed'}">${ok ? 'HEALTHY' : 'DEGRADED'}</span> ${last.replicas_ready}${last.replicas_total != null ? '/' + last.replicas_total : ''} replica(s) Ready ${sim ? raw(modeBadge(true).s) : ''}`;
