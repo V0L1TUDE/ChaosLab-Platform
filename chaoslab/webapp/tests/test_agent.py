@@ -35,15 +35,28 @@ class PolicyTests(unittest.TestCase):
         j = job()
         j["engine_config"]["evil"] = {"exec": ["rm", "-rf", "/"]}
         j["engine_config"]["application"] = {"enabled": True, "health_probe": {"type": "exec", "command": ["sh", "-c", "id"]}}
-        j["engine_config"]["telemetry"] = {"enabled": True, "query_endpoint": "http://169.254.169.254"}
+        j["engine_config"]["telemetry"] = {"enabled": True, "service_name": "web", "max_allowed_p95_ms": 500}
         j["engine_config"]["fault"]["inject"] = "$(whoami)"
         cfg, reason = agent_mod.validate_job(j, POLICY())
         self.assertIsNone(reason)
         self.assertEqual(cfg["application"], {"enabled": False})       # probes (could be exec) are never run
-        self.assertEqual(cfg["telemetry"], {"enabled": False})
+        self.assertEqual(cfg["telemetry"], {"enabled": False})          # the engine's own Jaeger client never runs
+        self.assertEqual(cfg["telemetry_spec"], {"service_name": "web", "max_allowed_p95_ms": 500, "verify_error_spike": False})
         self.assertNotIn("evil", cfg)
         self.assertEqual(set(cfg["fault"]), {"type", "mode"})
         self.assertEqual(cfg["target"], {"namespace": "shop", "label": {"app": "web"}})
+
+    def test_server_cannot_choose_where_tracing_is_queried(self):
+        """A job naming a Jaeger endpoint (e.g. the cloud metadata IP) is refused outright: only the agent picks it."""
+        for bad in ({"enabled": True, "query_endpoint": "http://169.254.169.254"},
+                    {"enabled": True, "jaeger": "kube-system/secret-svc:80"},
+                    {"enabled": True, "traffic": {"service": "web", "port": 80, "path": "http://evil/"}},
+                    {"enabled": True, "verify_error_spike": True}):          # spike check without traffic
+            j = job()
+            j["engine_config"]["telemetry"] = bad
+            cfg, reason = agent_mod.validate_job(j, POLICY())
+            self.assertIsNone(cfg, bad)
+            self.assertIn("invalid telemetry spec", reason)
 
     def test_namespace_allow_list_is_enforced_locally(self):
         self.reject(job(ns="kube-system"), "allow-list")

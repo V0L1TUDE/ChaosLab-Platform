@@ -76,3 +76,35 @@ subjects:
   - kind: ServiceAccount
     name: chaoslab-agent
     namespace: chaoslab-agent
+---
+# ---- OPTIONAL: tracing checks (only if you start the agent with --jaeger NAMESPACE/SERVICE:PORT) ----
+# Read-only access to the Jaeger query Service in its namespace (replace TRACING_NAMESPACE, e.g. default or observability).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaoslab-agent-tracing
+  namespace: TRACING_NAMESPACE
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chaoslab-agent-tracing
+  namespace: TRACING_NAMESPACE
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: chaoslab-agent-tracing
+subjects:
+  - kind: ServiceAccount
+    name: chaoslab-agent
+    namespace: chaoslab-agent

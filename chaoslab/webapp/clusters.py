@@ -85,6 +85,7 @@ def cluster_to_dict(row, include_inventory: bool = False) -> Dict[str, Any]:
         "kube_version": row["kube_version"], "created_at": row["created_at"],
         "allowed_namespaces": json.loads(row["allowed_namespaces"]) if row["allowed_namespaces"] else [],
         "inventory_at": row["inventory_at"],
+        "telemetry_source": row["telemetry_source"],
         "enroll_expires_at": row["enroll_expires_at"] if row["status"] == "pending" else None,
     }
     if include_inventory:
@@ -219,6 +220,9 @@ def record_heartbeat(row, body: Dict[str, Any], ip: Optional[str]) -> None:
     namespaces = body.get("allowed_namespaces")
     if isinstance(namespaces, list) and namespaces and all(isinstance(n, str) and _DNS_LABEL.match(n) for n in namespaces[:50]):
         sets.append("allowed_namespaces = ?"); args.append(json.dumps(sorted(set(namespaces[:50]))))
+    ts = body.get("telemetry_source")
+    if ts is None or (isinstance(ts, str) and re.match(r"^[a-z0-9-]{1,63}/[a-z0-9-]{1,63}:\d{1,5}$", ts)):
+        sets.append("telemetry_source = ?"); args.append(ts)
     inv = body.get("inventory")
     if isinstance(inv, dict):
         clean: Dict[str, List[Dict[str, Any]]] = {}

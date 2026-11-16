@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS clusters (
     allowed_namespaces TEXT,                                 -- JSON list, reported by the agent (its local allow-list)
     inventory_json     TEXT,                                 -- agent-reported deployments per allowed namespace
     inventory_at       TEXT,
+    telemetry_source   TEXT,                                 -- agent-reported Jaeger location (display only)
     last_seen          TEXT,
     created_at         TEXT    NOT NULL
 );
@@ -98,7 +99,8 @@ CREATE TABLE IF NOT EXISTS applications (
     namespace         TEXT,                   -- sandbox namespace while deployed
     deployed_at       TEXT,
     deploy_error      TEXT,
-    probe_json        TEXT,                   -- {service: validated probe spec} for connected-cluster apps
+    probe_json        TEXT,
+    telemetry_json    TEXT,                   -- {service: validated tracing-check spec} for connected-cluster apps                   -- {service: validated probe spec} for connected-cluster apps
     cluster_id        INTEGER REFERENCES clusters(id),   -- set for applications living in a connected cluster
     created_at        TEXT    NOT NULL
 );
@@ -188,9 +190,12 @@ def init_db() -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(applications)")}
         if "storage_backend" not in cols:
             conn.execute("ALTER TABLE applications ADD COLUMN storage_backend TEXT NOT NULL DEFAULT 'local'")
-        for col in ("manifest_json", "validation_json", "namespace", "deployed_at", "deploy_error", "probe_json"):
+        for col in ("manifest_json", "validation_json", "namespace", "deployed_at", "deploy_error", "probe_json", "telemetry_json"):
             if col not in cols:
                 conn.execute(f"ALTER TABLE applications ADD COLUMN {col} TEXT")
+        cl_cols = {r["name"] for r in conn.execute("PRAGMA table_info(clusters)")}
+        if "telemetry_source" not in cl_cols:
+            conn.execute("ALTER TABLE clusters ADD COLUMN telemetry_source TEXT")
         if "cluster_id" not in cols:
             conn.execute("ALTER TABLE applications ADD COLUMN cluster_id INTEGER REFERENCES clusters(id)")
         exp_cols = {r["name"] for r in conn.execute("PRAGMA table_info(experiments)")}

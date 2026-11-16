@@ -42,6 +42,22 @@ to 25 s while the replacement warms up). The evidence goes to the server, whose 
 `app_functional_check` and `app_logs_healthy` (PASS/FAIL; N/A when not configured; SKIP if configured but the agent had no probe evidence).
 Only GET requests are possible; use read-only endpoints.
 
+## Tracing checks (telemetry invariants)
+If your services send traces to Jaeger, start the agent with `--jaeger NAMESPACE/SERVICE:PORT` (for example
+`--jaeger default/jaeger:16686`). Then, under **Tracing checks** on the application page, choose per service:
+* the name of the service in Jaeger (defaults to the service name) and the maximum p95 latency after recovery;
+* optionally a **caller** (e.g. `task-service` `GET /tasks/test`) that the agent requests once per second while the fault
+  is active, and "require the fault to be visible as error spans".
+
+After the experiment the agent queries Jaeger **read-only** through a temporary port-forward to that Service and reports
+traces, p95 latency and error spans; the server's Oracle evaluates `telemetry_traces_recorded`,
+`telemetry_latency_recovered` and `telemetry_error_spike_detected`. Where Jaeger runs is decided **only** by the agent's
+flag; a job that names any endpoint is refused. If tracing cannot be collected (no `--jaeger`, Jaeger down), the three
+checks show **SKIP**, never a false PASS or FAIL. With probes and tracing configured, all 11 invariants are evaluated.
+
+Why the caller matters: when the target pod is killed it cannot record its own errors. Its callers can: in the
+reference app, `task-service` keeps answering `200` (graceful degradation) while tracing shows the failed internal calls.
+
 ## Prerequisites
 * A Kubernetes cluster with **Chaos Mesh** installed and your application running.
 * `kubectl` configured for that cluster (or run in-cluster with `agent-rbac.yaml`).
@@ -77,11 +93,12 @@ The pod runs as non-root with a read-only service-account scope and a 16 MiB vol
 | `--allowed-faults` | `CHAOSLAB_ALLOWED_FAULTS` | pod-kill,network-delay,network-loss |
 | `--max-duration` | `CHAOSLAB_MAX_DURATION` | 120 |
 | `--state-dir` | `CHAOSLAB_STATE_DIR` | `~/.chaoslab-agent` |
+| `--jaeger` | `CHAOSLAB_JAEGER` | off (`NAMESPACE/SERVICE:PORT` of the Jaeger query Service) |
 | `--insecure-allow-http` | | off |
 
 ## Limitations (v1)
-* gRPC services can't be probed yet (HTTP GET and logs only), and telemetry (Jaeger) invariants show **N/A** for customer clusters.
-  Probe a gRPC app through an HTTP health endpoint if it has one.
+* gRPC services can't be probed yet (HTTP GET and logs only); probe a gRPC app through an HTTP health endpoint if it has one.
+* Tracing checks support Jaeger's query API (other backends such as Tempo are not supported yet).
 * Network faults: the engine's recovery time for network chaos is nominal (see the main README); it is shown as not measured.
 * One experiment per cluster at a time; one agent per cluster.
 * Evidence is trusted to the extent the agent is trusted (the server re-runs the Oracle on it but cannot independently

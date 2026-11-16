@@ -239,6 +239,7 @@ async function uploadApp(form) {
 async function pageAppDetail(id) {
   const {application: a} = await api('GET', `/api/applications/${id}`);
   S.probes = a.probes || {};
+  S.tracing = a.telemetry || {};
   const cat = a.catalog;
   render(shell('#/apps', h`
     <div class="page-head"><div><a href="#/apps" class="small">← Applications</a>
@@ -255,6 +256,7 @@ async function pageAppDetail(id) {
     ${a.cluster ? h`<div class="banner ${a.cluster.online && !a.cluster.paused ? 'live' : 'info'}">Cluster <a href="#/clusters/${a.cluster.id}"><b>${a.cluster.name}</b></a>: agent ${a.cluster.paused ? 'paused (emergency stop)' : a.cluster.online ? 'online' : 'offline'}.</div>` : ''}
     ${a.deployment ? deploymentCard(a) : ''}
     ${a.cluster && a.catalog ? probesCard(a) : ''}
+    ${a.cluster && a.catalog ? tracingCard(a) : ''}
     ${cat ? h`<div class="grid g2" style="align-items:start">
       <div class="card"><div class="card-title"><h2>Services (namespace <code>${cat.namespace}</code>)</h2></div>
         ${discoveryNote(cat.discovery, a.id)}
@@ -372,6 +374,65 @@ async function saveProbes(form) {
     toast('Probes saved.', 'ok');
     await pageAppDetail(+form.dataset.id);
   } catch (e) { fail(e.message); }
+}
+
+function tracingSummary(t) {
+  const parts = [`traces of "${t.service_name}" · p95 ≤ ${t.max_allowed_p95_ms} ms`];
+  if (t.traffic) parts.push(`traffic: GET ${t.traffic.service}:${t.traffic.port}${t.traffic.path} during the fault`);
+  if (t.verify_error_spike) parts.push('error spike required');
+  return parts.join(' · ');
+}
+
+function tracingCard(a) {
+  const services = a.catalog.targetable_services;
+  const configured = Object.entries(a.telemetry || {});
+  const src = a.cluster.telemetry_source;
+  return h`<div class="card"><div class="card-title"><h2>Tracing checks</h2></div>
+    <div class="muted small" style="margin-bottom:10px">Uses your distributed tracing (Jaeger) to check the three telemetry invariants: traces were recorded,
+      p95 latency recovered after the fault, and (optionally) the fault was visible as error spans. The agent queries Jaeger <b>read-only</b>.
+      Where Jaeger runs is set on the agent, never by this site.</div>
+    ${src ? h`<div class="banner live">Agent tracing source: <code>${src}</code></div>`
+          : h`<div class="banner info"><div>The agent has no tracing source yet: these checks will show <b>SKIP</b>. Restart the agent with
+              <code>--jaeger NAMESPACE/SERVICE:PORT</code> (for example <code>--jaeger default/jaeger:16686</code>).</div></div>`}
+    ${configured.length ? h`<div style="margin-bottom:12px">${configured.map(([svc, t]) => h`<div class="svc-row" style="padding:6px 0;border-bottom:1px solid #1d2a42"><div><span class="mono"><b>${svc}</b></span><div class="muted small">${tracingSummary(t)}</div></div>
+      <button class="btn danger sm" data-action="tracing-remove" data-id="${a.id}" data-service="${svc}">Remove</button></div>`)}</div>` : ''}
+    ${services.length ? h`<div id="tracing-error"></div>
+    <form data-form="tracing" data-id="${a.id}" novalidate>
+      <div class="grid g3">
+        <div class="field"><label>Service under test</label><select name="service">${services.map(s => h`<option value="${s}">${s}${a.telemetry && a.telemetry[s] ? ' (configured)' : ''}</option>`)}</select></div>
+        <div class="field"><label>Name in Jaeger (optional)</label><input type="text" name="service_name" placeholder="same as the service"></div>
+        <div class="field"><label>Max p95 after recovery (ms)</label><input type="text" name="p95" inputmode="numeric" value="1000"></div>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="spike"> Require the fault to be visible as error spans (needs traffic below)</label>
+      <div class="muted small" style="margin:6px 0">Traffic during the fault: the agent sends one GET per second to a <b>caller</b> of the service while the fault is active (for example <code>task-service</code> → <code>/tasks/test</code>, which calls <code>project-service</code>).</div>
+      <div class="grid g3">
+        <div class="field"><label>Caller service</label><select name="t_service"><option value="">(no traffic)</option>${services.map(s => h`<option value="${s}">${s}</option>`)}</select></div>
+        <div class="field"><label>Caller port</label><input type="text" name="t_port" inputmode="numeric" placeholder="8003"></div>
+        <div class="field"><label>Caller path (GET)</label><input type="text" name="t_path" placeholder="/tasks/test"></div>
+      </div>
+      <button class="btn primary" type="submit">Save tracing checks for this service</button>
+    </form>` : ''}
+  </div>`;
+}
+
+function fillTracingForm(form, svc) {
+  const t = (S.tracing || {})[svc], set = (n, v) => { form[n].value = v == null ? '' : v; };
+  set('service_name', t && t.service_name !== svc ? t.service_name : ''); set('p95', t ? t.max_allowed_p95_ms : 1000);
+  form.spike.checked = !!(t && t.verify_error_spike);
+  set('t_service', t && t.traffic ? t.traffic.service : ''); set('t_port', t && t.traffic && t.traffic.port); set('t_path', t && t.traffic && t.traffic.path);
+}
+
+async function saveTracing(form) {
+  const box = document.getElementById('tracing-error'); box.innerHTML = '';
+  const num = v => (/^\d+$/.test(String(v).trim()) ? +v : NaN);
+  const telemetry = {max_allowed_p95_ms: num(form.p95.value), verify_error_spike: form.spike.checked};
+  if (form.service_name.value.trim()) telemetry.service_name = form.service_name.value.trim();
+  if (form.t_service.value) telemetry.traffic = {service: form.t_service.value, port: num(form.t_port.value), path: form.t_path.value.trim()};
+  try {
+    await api('POST', `/api/applications/${form.dataset.id}/telemetry`, {service: form.service.value, telemetry});
+    toast('Tracing checks saved.', 'ok');
+    await pageAppDetail(+form.dataset.id);
+  } catch (e) { box.innerHTML = h`<div class="banner err">${e.message}</div>`.s; }
 }
 
 /* ---------- service discovery status ---------- */
@@ -707,7 +768,7 @@ async function pageClusterDetail(id) {
   render(shell('#/clusters', h`
     <div class="page-head"><div><a href="#/clusters" class="small">← Clusters</a>
       <h1>${c.name} ${statusBadge(c.state)}</h1>
-      <p>${c.state === 'pending' ? 'Waiting for the agent to connect.' : c.state === 'revoked' ? 'This cluster was removed. Its history is kept.' : `Agent ${c.agent_version || ''} · Kubernetes ${c.kube_version || '?'} · last seen ${c.last_seen ? fmtDate(c.last_seen) : 'never'}`}</p></div>
+      <p>${c.state === 'pending' ? 'Waiting for the agent to connect.' : c.state === 'revoked' ? 'This cluster was removed. Its history is kept.' : `Agent ${c.agent_version || ''} · Kubernetes ${c.kube_version || '?'} · tracing ${c.telemetry_source || 'not configured'} · last seen ${c.last_seen ? fmtDate(c.last_seen) : 'never'}`}</p></div>
       <div class="actions">
         ${c.status === 'connected' && !c.paused ? h`<button class="btn danger" data-action="cluster-stop" data-id="${c.id}">■ Emergency stop</button>` : ''}
         ${c.paused ? h`<button class="btn primary" data-action="cluster-resume" data-id="${c.id}">Resume</button>` : ''}
@@ -759,6 +820,8 @@ async function registerClusterApp(form) {
 document.addEventListener('change', ev => {
   const form = ev.target.closest && ev.target.closest('form[data-form=probes]');
   if (form && ev.target.name === 'service') fillProbeForm(form, ev.target.value);
+  const tform = ev.target.closest && ev.target.closest('form[data-form=tracing]');
+  if (tform && ev.target.name === 'service') fillTracingForm(tform, ev.target.value);
 });
 
 document.addEventListener('input', ev => {
@@ -786,6 +849,9 @@ document.addEventListener('click', async ev => {
       toast('Application deleted.', 'ok');
       if (el.dataset.then === 'apps') location.hash = '#/apps'; else await pageApps();
     } catch (e) { toast(e.message, 'err'); }
+  } else if (action === 'tracing-remove') {
+    try { await api('POST', `/api/applications/${el.dataset.id}/telemetry`, {service: el.dataset.service, telemetry: null}); toast('Tracing checks removed.', 'ok'); await pageAppDetail(+el.dataset.id); }
+    catch (e) { toast(e.message, 'err'); }
   } else if (action === 'probes-remove') {
     try { await api('POST', `/api/applications/${el.dataset.id}/probes`, {service: el.dataset.service, probes: null}); toast('Probes removed.', 'ok'); await pageAppDetail(+el.dataset.id); }
     catch (e) { toast(e.message, 'err'); }
@@ -838,6 +904,7 @@ document.addEventListener('submit', ev => {
   else if (kind === 'cluster-create') createCluster(form);
   else if (kind === 'cluster-app') registerClusterApp(form);
   else if (kind === 'probes') saveProbes(form);
+  else if (kind === 'tracing') saveTracing(form);
   else if (kind === 'experiment') window.__runExperiment && window.__runExperiment();
 });
 

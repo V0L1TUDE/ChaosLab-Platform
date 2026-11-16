@@ -3,7 +3,7 @@
 import json
 from typing import Any, Dict, Optional
 
-from . import catalog, config, db, deployments, manifests, probe_spec, uploads
+from . import catalog, config, db, deployments, manifests, probe_spec, telemetry_spec, uploads
 from .http_core import HttpError, json_response, router
 
 
@@ -138,9 +138,11 @@ def application_detail(req):
                             "inside that cluster; nothing is deployed or changed by this server.")
             if resolved:
                 data["probes"] = resolved["probes"]
+                data["telemetry"] = resolved["telemetry"]
                 data["catalog"] = catalog.describe_app(resolved)
                 data["cluster"] = {"id": resolved["cluster_id"], "name": resolved["cluster_name"],
-                                   "online": resolved["cluster_online"], "paused": resolved["cluster_paused"]}
+                                   "online": resolved["cluster_online"], "paused": resolved["cluster_paused"],
+                                   "telemetry_source": resolved["telemetry_source"]}
             else:
                 data["note"] = "The cluster for this application was removed. Past experiments and reports are kept."
         elif resolved:
@@ -234,3 +236,32 @@ def set_probes(req):
             probes[service] = clean
         conn.execute("UPDATE applications SET probe_json = ? WHERE id = ?", (json.dumps(probes) if probes else None, row["id"]))
     return json_response({"probes": probes})
+
+
+@router.route("POST", "/api/applications/<id>/telemetry")
+def set_telemetry(req):
+    """Set (or clear, with telemetry=null) the tracing checks for one service of a connected-cluster app."""
+    body = req.json()
+    service = body.get("service")
+    with db.session() as conn:
+        row = conn.execute("SELECT * FROM applications WHERE id = ? AND user_id = ?", (_app_id(req), req.user["id"])).fetchone()
+        if not row:
+            raise HttpError(404, "Application not found.")
+        if not row["cluster_id"]:
+            raise HttpError(409, "Tracing checks are available for applications in a connected cluster.")
+        resolved = catalog.resolve_app(row)
+        if not resolved:
+            raise HttpError(409, "The cluster for this application was removed.")
+        names = catalog.targetable_services(resolved)
+        if not isinstance(service, str) or service not in names:
+            raise HttpError(400, f"Unknown service. Choose one of: {', '.join(names) or '(none reported yet)'}.")
+        current = json.loads(row["telemetry_json"]) if row["telemetry_json"] else {}
+        if body.get("telemetry") is None:
+            current.pop(service, None)
+        else:
+            clean, err = telemetry_spec.validate(body["telemetry"], service, names)
+            if err:
+                raise HttpError(400, err)
+            current[service] = clean
+        conn.execute("UPDATE applications SET telemetry_json = ? WHERE id = ?", (json.dumps(current) if current else None, row["id"]))
+    return json_response({"telemetry": current})

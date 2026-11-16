@@ -120,8 +120,10 @@ def _resolve_cluster_app(row) -> Optional[Dict[str, Any]]:
             "namespace": row["namespace"], "static_services": [], "curated": False,
             "cluster_id": cluster["id"], "cluster_name": cluster["name"], "cluster_online": clusters.is_online(cluster),
             "cluster_paused": bool(cluster["paused"]), "cluster_seen": cluster["last_seen"],
+            "telemetry_source": cluster["telemetry_source"],
             "agent_inventory": clusters.inventory_services(cluster, row["namespace"]),
             "probes": json.loads(row["probe_json"]) if row["probe_json"] else {},
+            "telemetry": json.loads(row["telemetry_json"]) if row["telemetry_json"] else {},
             "inventory_at": cluster["inventory_at"]}
 
 
@@ -374,4 +376,8 @@ def build_engine_config(app: Dict[str, Any], service: str, fault_id: str, durati
             cfg["application"] = {"enabled": False}
         if "telemetry" not in cfg and "telemetry" not in verification:
             cfg["telemetry"] = {"enabled": False}
+    if not full_verification and (app.get("telemetry") or {}).get(service):
+        # Tracing checks configured for this service of a connected cluster (collected by the agent).
+        from . import telemetry_spec
+        cfg["telemetry"] = telemetry_spec.to_engine_telemetry(app["telemetry"][service])
     return cfg

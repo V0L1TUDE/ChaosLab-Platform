@@ -99,12 +99,13 @@ def validate_probe_spec(spec: Any) -> Tuple[Optional[Dict[str, Any]], Optional[s
 
 # ============================================================================ port-forward + HTTP GET
 class PortForward:
-    """`kubectl port-forward pod/NAME :PORT` on 127.0.0.1, torn down on exit."""
+    """`kubectl port-forward pod/NAME :PORT` (or svc/NAME) on 127.0.0.1, torn down on exit."""
 
-    def __init__(self, namespace: str, pod: str, port: int, startup_timeout: float = 10.0):
-        if not DNS_LABEL.match(namespace) or not re.match(r"^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", pod) or not _int(port, 1, 65535):
+    def __init__(self, namespace: str, pod: str, port: int, startup_timeout: float = 10.0, kind: str = "pod"):
+        if (kind not in ("pod", "svc") or not DNS_LABEL.match(namespace)
+                or not re.match(r"^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", pod) or not _int(port, 1, 65535)):
             raise ProbeError("invalid forward target")
-        self.args = ["kubectl", "port-forward", "-n", namespace, f"pod/{pod}", f":{port}", "--address", "127.0.0.1"]
+        self.args = ["kubectl", "port-forward", "-n", namespace, f"{kind}/{pod}", f":{port}", "--address", "127.0.0.1"]
         self.startup_timeout = startup_timeout
         self.proc: Optional[subprocess.Popen] = None
         self.local_port = 0
@@ -142,14 +143,14 @@ class PortForward:
                 self.proc.kill()
 
 
-def http_get(local_port: int, path: str, timeout: float = 5.0) -> Dict[str, Any]:
+def http_get(local_port: int, path: str, timeout: float = 5.0, max_body: int = MAX_BODY) -> Dict[str, Any]:
     """One GET to 127.0.0.1:local_port. Redirects are NOT followed; the body is capped."""
     started = time.time()
     conn = http.client.HTTPConnection("127.0.0.1", local_port, timeout=timeout)
     try:
         conn.request("GET", path, headers={"Host": "localhost", "User-Agent": "chaoslab-agent-probe", "Connection": "close"})
         resp = conn.getresponse()
-        body = resp.read(MAX_BODY + 1)[:MAX_BODY]
+        body = resp.read(max_body + 1)[:max_body]
         return {"status": resp.status, "body": body.decode("utf-8", errors="replace"),
                 "latency_ms": round((time.time() - started) * 1000, 1)}
     except (OSError, http.client.HTTPException) as e:

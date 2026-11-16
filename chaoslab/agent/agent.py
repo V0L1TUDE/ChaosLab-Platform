@@ -48,6 +48,7 @@ LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import safe_probes  # noqa: E402  (HTTP GET / log probes: no exec, no scripts)
+import safe_telemetry  # noqa: E402  (read-only Jaeger queries via a local port-forward)
 
 
 def log(msg: str) -> None:
@@ -57,7 +58,7 @@ def log(msg: str) -> None:
 # ============================================================================ local policy (authoritative)
 class Policy:
     def __init__(self, namespaces: List[str], faults: Tuple[str, ...] = ENGINE_FAULTS, max_duration: int = 120,
-                 allow_probes: bool = True):
+                 allow_probes: bool = True, jaeger: Optional[Tuple[str, str, int]] = None):
         bad = [n for n in namespaces if not DNS_LABEL.match(n)]
         if not namespaces:
             raise ValueError("allowed namespaces must be a non-empty list of valid namespace names")
@@ -68,6 +69,7 @@ class Policy:
         self.faults = tuple(f for f in faults if f in ENGINE_FAULTS)
         self.max_duration = max_duration
         self.allow_probes = allow_probes
+        self.jaeger = jaeger              # (namespace, service, port) or None: never taken from the server
 
 
 def validate_job(job: Dict[str, Any], policy: Policy) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -129,9 +131,16 @@ def validate_job(job: Dict[str, Any], policy: Policy) -> Tuple[Optional[Dict[str
             probes, perr = safe_probes.validate_probe_spec(app_cfg["probes"])
             if perr:
                 return None, f"invalid probe spec: {perr}"
+        tspec = None
+        tel_cfg = cfg.get("telemetry")
+        if isinstance(tel_cfg, dict) and tel_cfg.get("enabled"):
+            tspec, terr = safe_telemetry.validate_telemetry_spec({k: v for k, v in tel_cfg.items() if k != "enabled"}, label["app"])
+            if terr:
+                return None, f"invalid telemetry spec: {terr}"
         return {"name": name, "target": {"namespace": ns, "label": {"app": label["app"]}}, "fault": clean_fault,
                 "recovery": {"timeout_seconds": timeout, "expected_ready_replicas": replicas},
-                "application": {"enabled": False}, "telemetry": {"enabled": False}, "probes": probes}, None
+                "application": {"enabled": False}, "telemetry": {"enabled": False}, "probes": probes,
+                "telemetry_spec": tspec}, None
     except (KeyError, TypeError, ValueError) as e:
         return None, f"malformed job: {type(e).__name__}"
 
@@ -304,12 +313,14 @@ def _engine(verifier_dir: Optional[str]):
     raise RuntimeError("ChaosLab engine not found (expected ../verifier/engine.py or CHAOSLAB_VERIFIER_DIR).")
 
 
-def engine_executor(job: Dict[str, Any], cfg: Dict[str, Any], reporter: Reporter, verifier_dir: Optional[str] = None) -> Dict[str, Any]:
+def engine_executor(job: Dict[str, Any], cfg: Dict[str, Any], reporter: Reporter, verifier_dir: Optional[str] = None,
+                    jaeger: Optional[Tuple[str, str, int]] = None) -> Dict[str, Any]:
     """Run the real ChaosLab engine against the local cluster. Returns {report}|{error}|{cancelled}."""
     import yaml
     eng = _engine(verifier_dir)
     probes = cfg.get("probes")
-    cfg = {k: v for k, v in cfg.items() if k != "probes"}          # the engine never sees probe settings
+    tspec = cfg.get("telemetry_spec")
+    cfg = {k: v for k, v in cfg.items() if k not in ("probes", "telemetry_spec")}   # the engine never sees these
     ns_, svc_ = cfg["target"]["namespace"], cfg["target"]["label"]["app"]
     pre_probe: Dict[str, Any] = {}
     if probes:
@@ -346,7 +357,15 @@ def engine_executor(job: Dict[str, Any], cfg: Dict[str, Any], reporter: Reporter
                 pass
             stop.wait(2.0)
 
+    traffic = (safe_telemetry.TrafficDriver(ns_, tspec["traffic"], kubectl)
+               if tspec and tspec.get("traffic") else None)
+    traffic_stats: Dict[str, Any] = {}
+
     def on_progress(phase, percent, message, data=None):
+        if traffic and phase in ("injecting", "waiting_impact", "waiting_recovery"):
+            traffic.start()                                   # caller traffic only while the fault is active
+        elif traffic and phase in ("probing_app", "telemetry", "oracle", "completed", "failed"):
+            traffic_stats.update(traffic.stop())
         if phase == "failed":
             state["failure"] = message
             reporter.event("failed", message, None, "error")
@@ -370,8 +389,27 @@ def engine_executor(job: Dict[str, Any], cfg: Dict[str, Any], reporter: Reporter
             outcome["report"]["application"] = post
             reporter.event("verification", f"Post-experiment probes: health {post['health_status']}"
                            f"{', functional ' + ('OK' if post['functional_test_passed'] else 'FAILED') if 'functional' in probes else ''}.", 92)
+        if traffic:
+            traffic_stats.update(traffic.stop())
+        if tspec and outcome.get("report") and not reporter.cancelled.is_set():
+            reporter.event("verification", "Collecting distributed traces from Jaeger (read-only)...", 93)
+            reporter.flush()
+            reporter.cancelled.wait(6)                        # let services flush their span batches
+            import telemetry as engine_telemetry             # verifier module: pure trace analysis, no network here
+            tel = safe_telemetry.collect(jaeger, tspec, outcome["report"], engine_telemetry.TelemetryClient().analyze_traces,
+                                         traffic_stats=traffic_stats or None)
+            outcome["report"]["telemetry"] = tel
+            if tel.get("available"):
+                reporter.event("verification", f"Traces: {tel.get('traces_count')} after recovery (p95 {tel.get('latency_ms', {}).get('p95')} ms); "
+                               f"{tel.get('error_spans_count')} error span(s) during the fault"
+                               + (f"; traffic sent {traffic_stats.get('sent', 0)} request(s), {traffic_stats.get('errors', 0)} failed" if traffic_stats else "")
+                               + ".", 96)
+            else:
+                reporter.event("verification", f"Tracing not collected: {tel.get('collection_error')}", 96, "warn")
         return outcome
     finally:
+        if traffic:
+            traffic.stop()
         # the engine writes reports into `work`; they are not needed (evidence was sent to the server)
         threading.Timer(15.0, shutil.rmtree, args=(work,), kwargs={"ignore_errors": True}).start()
 
@@ -474,7 +512,8 @@ class Agent:
         busy = bool(self.job_thread and self.job_thread.is_alive())
         body: Dict[str, Any] = {"agent_version": VERSION, "cluster_uid": self.cluster_uid,
                                 "allowed_namespaces": self.policy.namespaces, "busy": busy,
-                                "wait": 0 if busy else self.poll_wait}
+                                "wait": 0 if busy else self.poll_wait,
+                                "telemetry_source": ("%s/%s:%d" % self.policy.jaeger) if self.policy.jaeger else None}
         if time.time() - self.last_inventory > 30:
             body["inventory"] = self.inventory_fn(self.policy.namespaces)
             self.last_inventory = time.time()
@@ -581,6 +620,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--allowed-faults", default=os.environ.get("CHAOSLAB_ALLOWED_FAULTS", ",".join(ENGINE_FAULTS)))
     p.add_argument("--max-duration", type=int, default=int(os.environ.get("CHAOSLAB_MAX_DURATION", "120")))
     p.add_argument("--state-dir", default=os.environ.get("CHAOSLAB_STATE_DIR", os.path.join(os.path.expanduser("~"), ".chaoslab-agent")))
+    p.add_argument("--jaeger", default=os.environ.get("CHAOSLAB_JAEGER"),
+                   help="tracing source for telemetry checks, NAMESPACE/SERVICE:PORT of the Jaeger query service (e.g. default/jaeger:16686)")
     p.add_argument("--no-probes", action="store_true", default=os.environ.get("CHAOSLAB_ALLOW_PROBES", "1") in ("0", "false", "no"),
                    help="never run application probes (jobs asking for them just get no application evidence)")
     p.add_argument("--ca-cert", default=os.environ.get("CHAOSLAB_CA_CERT"),
@@ -594,7 +635,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         policy = Policy([n.strip() for n in args.allowed_namespaces.split(",") if n.strip()],
                         tuple(f.strip() for f in args.allowed_faults.split(",") if f.strip()), args.max_duration,
-                        allow_probes=not args.no_probes)
+                        allow_probes=not args.no_probes, jaeger=safe_telemetry.parse_jaeger(args.jaeger))
         api = Api(args.server, args.insecure_allow_http, args.ca_cert)
     except ValueError as e:
         p.error(str(e))
@@ -608,7 +649,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     state_file = os.path.join(args.state_dir, "agent.json")
     agent = Agent(api, policy, state_file,
-                  executor=lambda job, cfg, rep: engine_executor(job, cfg, rep, args.verifier_dir))
+                  executor=lambda job, cfg, rep: engine_executor(job, cfg, rep, args.verifier_dir, policy.jaeger))
     problem = establish_credential(agent, args.token)
     if problem:
         log(problem)
@@ -627,7 +668,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         pass
     log(f"ChaosLab agent {VERSION} running. Server: {api.base}. Namespaces: {', '.join(policy.namespaces)}. "
         f"Faults: {', '.join(policy.faults)}. Max duration: {policy.max_duration}s. "
-        f"Probes: {'safe HTTP GET/log probes' if policy.allow_probes else 'disabled'}. Outbound-only.")
+        f"Probes: {'safe HTTP GET/log probes' if policy.allow_probes else 'disabled'}. "
+        f"Tracing: {('%s/%s:%d' % policy.jaeger) if policy.jaeger else 'not configured (--jaeger)'}. Outbound-only.")
     return agent.run_forever()
 
 
