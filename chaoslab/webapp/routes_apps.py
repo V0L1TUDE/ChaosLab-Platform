@@ -21,8 +21,10 @@ def app_to_dict(row, experiments_count: int = 0) -> Dict[str, Any]:
         "executable": builtin,               # only the built-in demo app can run experiments in the MVP
         "experiments_count": experiments_count,
     }
+    d["slug"] = row["slug"]
     if builtin:
-        d["services_count"] = len(catalog.SERVICES)
+        app = catalog.get_builtin(row["slug"])
+        d["services_count"] = len(catalog.discover_services(app)["services"]) if app else 0
     return d
 
 
@@ -50,7 +52,7 @@ def list_applications(req):
         rows = conn.execute(
             "SELECT a.*, (SELECT COUNT(*) FROM experiments e WHERE e.application_id = a.id AND e.user_id = ?) AS n "
             "FROM applications a WHERE a.user_id = ? OR a.user_id IS NULL "
-            "ORDER BY (a.user_id IS NULL) DESC, a.created_at DESC, a.id DESC",
+            "ORDER BY (a.user_id IS NULL) DESC, CASE WHEN a.user_id IS NULL THEN a.id END ASC, a.id DESC",
             (uid, uid),
         ).fetchall()
     return json_response({"applications": [app_to_dict(r, r["n"]) for r in rows]})
@@ -102,7 +104,7 @@ def application_detail(req):
     data = app_to_dict(row, len(exps))
     data["experiments"] = [dict(e) for e in exps]
     if row["user_id"] is None:
-        data["catalog"] = catalog.describe_demo_app()
+        data["catalog"] = catalog.describe_app(catalog.get_builtin(row["slug"]), force=req.qs("refresh") == "1")
     else:
         data["note"] = ("Uploaded applications are registered and stored only. Automatic deployment and "
                         "experiment execution for uploaded applications is not part of this MVP; run experiments "

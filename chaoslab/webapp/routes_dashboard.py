@@ -12,7 +12,7 @@ def dashboard(req):
         apps = conn.execute(
             "SELECT a.*, (SELECT COUNT(*) FROM experiments e WHERE e.application_id = a.id AND e.user_id = ?) AS n "
             "FROM applications a WHERE a.user_id = ? OR a.user_id IS NULL "
-            "ORDER BY (a.user_id IS NULL) DESC, a.id DESC", (uid, uid)).fetchall()
+            "ORDER BY (a.user_id IS NULL) DESC, CASE WHEN a.user_id IS NULL THEN a.id END ASC, a.id DESC", (uid, uid)).fetchall()
         stats = conn.execute(
             "SELECT COUNT(*) AS total, "
             "SUM(status = 'completed' AND oracle_verdict = 'PASS') AS passed, "

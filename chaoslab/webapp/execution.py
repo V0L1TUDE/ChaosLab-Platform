@@ -145,7 +145,7 @@ def build_result_common(*, simulated: bool, data_source: str, spec: Dict[str, An
         "mode": "simulated" if simulated else "live",
         "simulated": simulated,
         "data_source": data_source,
-        "target": {"service": spec["service"], "namespace": catalog.DEMO_NAMESPACE},
+        "target": {"service": spec["service"], "namespace": spec["engine_config"]["target"]["namespace"]},
         "fault": {"id": spec["fault_id"], "label": fault.get("label"), "engine_type": fault.get("engine_type"),
                   "duration_seconds": spec["duration"]},
         "timeline": timeline,

@@ -38,12 +38,13 @@ def capabilities() -> Dict[str, Any]:
 
 def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any, duration: Any, mode: Any) -> int:
     global _live_active
-    if app_row["slug"] != catalog.DEMO_SLUG:
-        raise ExperimentRejected("Experiments can only be run against the built-in demo application in this MVP.", 400)
+    app = catalog.get_builtin(app_row["slug"])
+    if not app:
+        raise ExperimentRejected("Experiments can only be run against the built-in demo applications in this MVP.", 400)
     if mode not in BACKENDS:
         raise ExperimentRejected("mode must be 'live' or 'simulated'.")
     try:
-        duration = catalog.validate_selection(service, fault_id, duration)
+        duration = catalog.validate_selection(app, service, fault_id, duration)
     except ValueError as e:
         raise ExperimentRejected(str(e))
 
@@ -51,6 +52,10 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
         cap = live_capability()
         if not cap["available"]:
             raise ExperimentRejected(f"Live execution is unavailable: {cap['reason']}", 503)
+        disc = catalog.discover_services(app)
+        if disc["source"] != "cluster":
+            raise ExperimentRejected(
+                f"Live execution is unavailable: {app['name']} was not found in the cluster ({disc['error']}).", 503)
 
     with db.session() as conn:
         active = conn.execute(
@@ -74,13 +79,13 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
             )
             exp_id = cur.lastrowid
             engine_config = catalog.build_engine_config(
-                service, fault_id, duration, f"chaoslab-exp-{exp_id}-{service}-{fault_id}",
+                app, service, fault_id, duration, f"chaoslab-exp-{exp_id}-{service}-{fault_id}",
                 full_verification=(mode == "simulated"),
             )
             conn.execute(
                 "UPDATE experiments SET config_json = ? WHERE id = ?",
                 (json.dumps({"service": service, "fault": fault_id, "duration_seconds": duration,
-                             "namespace": catalog.DEMO_NAMESPACE, "engine_config": engine_config}), exp_id),
+                             "namespace": app["namespace"], "engine_config": engine_config}), exp_id),
             )
         except Exception:
             if mode == "live":

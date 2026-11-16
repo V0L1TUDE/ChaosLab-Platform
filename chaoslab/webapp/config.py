@@ -57,6 +57,9 @@ MIN_PASSWORD_LENGTH = 8
 MAX_UPLOAD_BYTES = _env_int("CHAOSLAB_MAX_UPLOAD_MB", 10) * 1024 * 1024
 ALLOWED_UPLOAD_EXTENSIONS = (".zip", ".tar", ".tar.gz", ".tgz", ".yaml", ".yml", ".json", ".md", ".txt")
 
+# Cluster service discovery (read-only `kubectl get deployments`); falls back to a static list.
+DISCOVERY_ENABLED = _env_bool("CHAOSLAB_DISCOVERY_ENABLED", True)
+
 # Execution
 # Live execution drives the real ChaosLab engine against the configured kubectl context.
 LIVE_ENABLED = _env_bool("CHAOSLAB_LIVE_ENABLED", True)

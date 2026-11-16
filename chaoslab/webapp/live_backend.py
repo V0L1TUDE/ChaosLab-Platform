@@ -56,7 +56,7 @@ def live_capability(force: bool = False) -> Dict[str, Any]:
     elif not shutil.which("kubectl"):
         value = {"available": False, "reason": "kubectl was not found on the server."}
     else:
-        ok, out = _kubectl(["get", "pods", "-n", catalog.DEMO_NAMESPACE, "-o", "name"])
+        ok, out = _kubectl(["get", "namespaces", "-o", "name"])
         if not ok:
             value = {"available": False, "reason": f"Kubernetes cluster not reachable: {out[:160]}"}
         else:
@@ -138,6 +138,13 @@ class LiveBackend(ExecutionBackend):
             "recovery": f"Replacement Ready at {ts['replacement_ready']}" if ts.get("replacement_ready") else None,
         }
         timeline = stage_timeline(sink.stage_times, detail)
+        is_network = "network" in str(report.get("fault", "")).lower()
+        notes = ["Collected live from the ChaosLab engine. Latency series are only available when "
+                 "Jaeger telemetry is enabled for the experiment."]
+        if is_network:
+            notes.append("Network faults: the engine does not measure recovery time (it reports a nominal 0.5 s after a "
+                         "fixed 5 s observation), so recovery time is shown as not measured. The "
+                         "recovery_within_timeout invariant uses that nominal engine value.")
         tel = report.get("telemetry") or {}
         lat = tel.get("latency_ms") or {}
         baseline = report.get("baseline", {})
@@ -154,8 +161,8 @@ class LiveBackend(ExecutionBackend):
                 "replacement_pod": report.get("replacement_pod"),
             },
             metrics={
-                "recovery_seconds": report.get("recovery_time_seconds"),
-                "total_recovery_seconds": report.get("total_recovery_seconds"),
+                "recovery_seconds": None if is_network else report.get("recovery_time_seconds"),
+                "total_recovery_seconds": None if is_network else report.get("total_recovery_seconds"),
                 "baseline_p95_ms": None,
                 "peak_p95_ms": None,
                 "post_recovery_p95_ms": lat.get("p95") if tel.get("traces_count") else None,
@@ -165,7 +172,6 @@ class LiveBackend(ExecutionBackend):
                 "series": [],   # filled from the sampled events by the runner
             },
             oracle=normalize_oracle(report["oracle_evaluation"], simulated=False),
-            notes=["Collected live from the ChaosLab engine. Latency series are only available when "
-                   "Jaeger telemetry is enabled for the experiment."],
+            notes=notes,
         )
 
