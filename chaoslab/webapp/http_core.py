@@ -186,7 +186,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(404, "Endpoint not found.")
             handler, auth_required, params = resolved
             req.params = params
-            req.ip = self.client_address[0]
+            req.ip = self._client_ip()
 
             cookies = SimpleCookie(self.headers.get("Cookie") or "")
             req.token = cookies[config.SESSION_COOKIE].value if config.SESSION_COOKIE in cookies else None
@@ -205,6 +205,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send(json_response({"error": "Internal server error."}, 500))
 
     # -- helpers ----------------------------------------------------------------------------
+    _LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+    _IP_RE = re.compile(r"^[0-9A-Fa-f:.]{2,45}$")
+
+    def _client_ip(self) -> str:
+        """The real client IP. X-Forwarded-For is honoured only from the local reverse proxy (TRUST_PROXY), and
+        only its right-most entry, which the proxy itself appended (anything to the left is client-controlled)."""
+        peer = self.client_address[0]
+        if config.TRUST_PROXY and peer in self._LOOPBACK:
+            xff = self.headers.get("X-Forwarded-For") or ""
+            last = xff.split(",")[-1].strip()
+            if self._IP_RE.match(last):
+                return last
+        return peer
+
     def _check_origin(self, method: str):
         """CSRF defence for state-changing requests: browsers always send Origin on these."""
         if method in ("POST", "DELETE"):

@@ -7,7 +7,7 @@ from .http_core import HttpError, json_response, router
 def _server_url(req) -> str:
     if config.PUBLIC_URL:
         return config.PUBLIC_URL
-    proto = req.headers.get("X-Forwarded-Proto") or "http"
+    proto = (req.headers.get("X-Forwarded-Proto") if config.TRUST_PROXY else None) or "http"
     return f"{proto}://{req.headers.get('Host') or f'{config.HOST}:{config.PORT}'}"
 
 
@@ -21,8 +21,13 @@ def _wrap(fn):
 def _enrollment_payload(req, token: str, row_id: int):
     with db.session() as conn:
         row = conn.execute("SELECT enroll_expires_at FROM clusters WHERE id = ?", (row_id,)).fetchone()
-    return {"token": token, "expires_at": row["enroll_expires_at"], "server_url": _server_url(req),
-            "note": "This token is shown once and works once. It is exchanged for a revocable agent credential."}
+    server_url = _server_url(req)
+    payload = {"token": token, "expires_at": row["enroll_expires_at"], "server_url": server_url,
+               "note": "This token is shown once and works once. It is exchanged for a revocable agent credential."}
+    if config.TLS_MODE == "internal":
+        # Self-signed deployment: the agent must be told which CA to trust (never to skip verification).
+        payload["ca_url"] = f"{server_url}/chaoslab-ca.crt"
+    return payload
 
 
 @router.route("GET", "/api/clusters")

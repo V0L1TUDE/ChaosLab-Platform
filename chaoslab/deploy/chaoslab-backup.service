@@ -1,0 +1,15 @@
+[Unit]
+Description=ChaosLab backup (database + reports, to S3 when configured)
+
+[Service]
+Type=oneshot
+User=chaoslab
+Group=chaoslab
+WorkingDirectory=/opt/chaoslab/chaoslab
+EnvironmentFile=/etc/chaoslab/chaoslab.env
+ExecStart=/usr/bin/python3 /opt/chaoslab/chaoslab/deploy/backup.py
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/chaoslab

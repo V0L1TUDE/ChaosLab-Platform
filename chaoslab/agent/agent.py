@@ -27,6 +27,7 @@ import re
 import signal
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -143,13 +144,19 @@ class ApiError(Exception):
 
 
 class Api:
-    def __init__(self, server: str, allow_http: bool = False):
+    def __init__(self, server: str, allow_http: bool = False, ca_cert: Optional[str] = None):
         parsed = urllib.parse.urlparse(server)
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
             raise ValueError("--server must be a URL like https://chaoslab.example.com")
         if parsed.scheme == "http" and parsed.hostname not in LOCAL_HOSTS and not allow_http:
             raise ValueError("Refusing to send credentials over plain HTTP. Use https:// (or --insecure-allow-http for testing).")
         self.base = server.rstrip("/")
+        self.ssl_context = None
+        if ca_cert:
+            if not os.path.isfile(ca_cert):
+                raise ValueError(f"--ca-cert file not found: {ca_cert}")
+            # Trust exactly this CA (for self-signed ChaosLab servers). Hostname checks stay ON.
+            self.ssl_context = ssl.create_default_context(cafile=ca_cert)
 
     def post(self, path: str, body: Dict[str, Any], bearer: Optional[str] = None, timeout: float = 40) -> Dict[str, Any]:
         data = json.dumps(body).encode("utf-8")
@@ -158,7 +165,7 @@ class Api:
             headers["Authorization"] = f"Bearer {bearer}"
         req = urllib.request.Request(self.base + path, data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout, context=self.ssl_context) as resp:
                 return json.loads(resp.read().decode("utf-8") or "{}")
         except urllib.error.HTTPError as e:
             try:
@@ -523,6 +530,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--state-dir", default=os.environ.get("CHAOSLAB_STATE_DIR", os.path.join(os.path.expanduser("~"), ".chaoslab-agent")))
     p.add_argument("--no-probes", action="store_true", default=os.environ.get("CHAOSLAB_ALLOW_PROBES", "1") in ("0", "false", "no"),
                    help="never run application probes (jobs asking for them just get no application evidence)")
+    p.add_argument("--ca-cert", default=os.environ.get("CHAOSLAB_CA_CERT"),
+                   help="CA certificate to trust for a self-signed ChaosLab server (download it from <server>/chaoslab-ca.crt)")
     p.add_argument("--insecure-allow-http", action="store_true", help="allow plain HTTP to a non-local server (testing only)")
     p.add_argument("--verifier-dir", default=None, help="path to chaoslab/verifier (default: auto-detected)")
     args = p.parse_args(argv)
@@ -533,7 +542,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         policy = Policy([n.strip() for n in args.allowed_namespaces.split(",") if n.strip()],
                         tuple(f.strip() for f in args.allowed_faults.split(",") if f.strip()), args.max_duration,
                         allow_probes=not args.no_probes)
-        api = Api(args.server, args.insecure_allow_http)
+        api = Api(args.server, args.insecure_allow_http, args.ca_cert)
     except ValueError as e:
         p.error(str(e))
 
