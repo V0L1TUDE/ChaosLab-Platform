@@ -34,7 +34,14 @@ cd chaoslab && python -m unittest discover -s webapp/tests
 | `CHAOSLAB_HOST` / `CHAOSLAB_PORT` | `127.0.0.1` / `8090` | Bind address |
 | `CHAOSLAB_DATA_DIR` | `chaoslab/webapp/data` | Root for DB, uploads, reports (git-ignored) |
 | `CHAOSLAB_DB_PATH` | `<data>/chaoslab.db` | SQLite file |
-| `CHAOSLAB_UPLOAD_DIR` | `<data>/uploads` | Uploaded application files |
+| `CHAOSLAB_UPLOAD_DIR` | `<data>/uploads` | Uploaded files when `CHAOSLAB_STORAGE=local` |
+| `CHAOSLAB_STORAGE` | `local` | `local` or `s3` for uploaded application files |
+| `CHAOSLAB_S3_BUCKET` | (none) | Required for `s3`. Private bucket name |
+| `CHAOSLAB_S3_REGION` | AWS default | Bucket region |
+| `CHAOSLAB_S3_PREFIX` | `uploads/` | Key prefix; the app only writes/deletes under it |
+| `CHAOSLAB_S3_SSE` | `AES256` | `AES256`, `aws:kms` or `none` (server-side encryption) |
+| `CHAOSLAB_S3_KMS_KEY_ID` | (none) | KMS key id/alias when `aws:kms` |
+| `CHAOSLAB_S3_ENDPOINT_URL` | (none) | MinIO / LocalStack / S3-compatible endpoint |
 | `CHAOSLAB_REPORT_DIR` | `<data>/reports` | Generated reports |
 | `CHAOSLAB_MAX_UPLOAD_MB` | `10` | Upload size limit |
 | `CHAOSLAB_SESSION_TTL_SECONDS` | `604800` | Session lifetime |
@@ -66,6 +73,25 @@ modes), `verifier/reporter.py` (Live runs also expose the engine's native HTML r
 the curated experiment YAMLs in `experiments/` (their application/telemetry probes are used for Live runs of
 the matching service+fault), and the Online Boutique deployment as the demo application.
 
+### Storage backends (local or S3)
+`storage.py` defines `put(key, data) -> ref` and an idempotent `delete(ref)`. Validation always runs first; only
+validated bytes reach the backend. The database records which backend holds each file (`applications.storage_backend`)
+and its reference (`file_path` = local path or S3 key), so switching backends never orphans or misroutes old files.
+
+```bash
+pip install boto3                      # only needed for S3
+export CHAOSLAB_STORAGE=s3 CHAOSLAB_S3_BUCKET=my-bucket CHAOSLAB_S3_REGION=ap-south-1
+python -m webapp                       # credentials: IAM role, AWS_* env vars or `aws configure` profile
+```
+Credentials are never configured in the app or sent to the browser. Recommended AWS setup: a **private** bucket with
+Block Public Access on, default encryption, no public/website access, and an IAM policy for the app limited to
+`s3:PutObject`, `s3:DeleteObject` on `arn:aws:s3:::BUCKET/uploads/*` and `s3:ListBucket`/`s3:GetBucketLocation`
+on the bucket (the startup health check uses `head_bucket`). Objects are written with `Content-Type:
+application/octet-stream` and SSE; the app has no endpoint that reads uploaded files back.
+Behaviour: bad config (no bucket / no boto3) stops startup with a clear error; an unreachable bucket only warns at
+startup and uploads return `503` without creating a record; if the S3 delete fails the record is kept (`502`) so the
+delete can be retried.
+
 ### Built-in applications and service discovery
 Three built-in applications are seeded (`catalog.BUILTIN_APPS`): Online Boutique (`default`), Learning Management
 (`learning-platform`) and Project Management (`project-platform`). Their services are **discovered from the
@@ -89,7 +115,7 @@ Live runs of e.g. `course-service` or `task-service` reuse their real HTTP healt
   simulation by registering another `ExecutionBackend`; the API and frontend do not change.
 
 ### Application uploads
-Stored outside the DB (`<uploads>/user_<id>/<uuid>.<ext>`), metadata in `applications`. Validation: extension
+Stored outside the DB through the storage backend (key `user_<id>/<uuid>.<ext>`), metadata in `applications`. Validation: extension
 allow-list, size limit, content sniffing (ZIP/gzip/TAR structure, UTF-8 text, JSON parse), archive path-traversal
 and link checks, executable/shebang rejection, sanitized display filename. Files are **never extracted or executed**,
 and cannot be downloaded back through the API. Uploaded apps are registered only; experiments run on the built-in demo.

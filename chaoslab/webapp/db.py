@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS applications (
     user_id           INTEGER REFERENCES users(id) ON DELETE CASCADE,
     name              TEXT    NOT NULL,
     description       TEXT    NOT NULL DEFAULT '',
-    file_path         TEXT,
+    file_path         TEXT,                   -- local path or S3 object key (see storage_backend)
+    storage_backend   TEXT    NOT NULL DEFAULT 'local',
     original_filename TEXT,
     file_size         INTEGER,
     upload_type       TEXT    NOT NULL,       -- 'builtin' | file extension of the upload
@@ -125,3 +126,7 @@ def init_db() -> None:
         os.makedirs(d, exist_ok=True)
     with session() as conn:
         conn.executescript(SCHEMA)
+        # Lightweight migration for databases created before storage_backend existed.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(applications)")}
+        if "storage_backend" not in cols:
+            conn.execute("ALTER TABLE applications ADD COLUMN storage_backend TEXT NOT NULL DEFAULT 'local'")

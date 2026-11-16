@@ -79,14 +79,17 @@ def upload_application(req):
     try:
         with db.session() as conn:
             cur = conn.execute(
-                "INSERT INTO applications (user_id, name, description, file_path, original_filename, file_size, "
-                "upload_type, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'registered', ?)",
-                (req.user["id"], name, description, meta["file_path"], meta["original_filename"],
+                "INSERT INTO applications (user_id, name, description, file_path, storage_backend, original_filename, "
+                "file_size, upload_type, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'registered', ?)",
+                (req.user["id"], name, description, meta["file_path"], meta["storage_backend"], meta["original_filename"],
                  meta["file_size"], meta["upload_type"], db.utcnow()),
             )
             row = conn.execute("SELECT * FROM applications WHERE id = ?", (cur.lastrowid,)).fetchone()
     except Exception:
-        uploads.delete_stored_file(meta["file_path"])   # don't orphan the file if the DB insert fails
+        try:   # don't orphan the stored object if the DB insert fails
+            uploads.delete_stored_file(meta["file_path"], meta["storage_backend"])
+        except uploads.UploadError:
+            pass
         raise
     return json_response({"application": app_to_dict(row)}, 201)
 
@@ -119,7 +122,11 @@ def delete_application(req):
         row = get_accessible_app(conn, uid, _app_id(req))
         if row["user_id"] is None:
             raise HttpError(403, "The built-in demo application cannot be deleted.")
-        path = row["file_path"]
+        ref, backend = row["file_path"], row["storage_backend"]
+        # Remove the stored object first: if the backend fails the record is kept so the delete can be retried.
+        try:
+            uploads.delete_stored_file(ref, backend)
+        except uploads.UploadError as e:
+            raise HttpError(e.status, str(e))
         conn.execute("DELETE FROM applications WHERE id = ? AND user_id = ?", (row["id"], uid))
-    uploads.delete_stored_file(path)
     return json_response({"ok": True})

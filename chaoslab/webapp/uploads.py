@@ -8,14 +8,13 @@ archive path-traversal check, executable rejection, and server-generated storage
 
 import io
 import json
-import os
 import re
 import tarfile
 import uuid
 import zipfile
 from typing import Dict, Tuple
 
-from . import config
+from . import config, storage
 
 _SAFE_CHARS = re.compile(r"[^A-Za-z0-9._ -]")
 _ARCHIVE_MEMBER_LIMIT = 20000
@@ -97,7 +96,7 @@ def _validate_content(ext: str, data: bytes) -> None:
 
 
 def validate_and_store(user_id: int, filename: str, data: bytes) -> Dict[str, object]:
-    """Validate an upload and write it to disk. Returns storage metadata for the DB row."""
+    """Validate an upload and hand it to the configured storage backend. Returns metadata for the DB row."""
     if not filename:
         raise UploadError("A file is required.")
     if len(data) > config.MAX_UPLOAD_BYTES:
@@ -105,25 +104,24 @@ def validate_and_store(user_id: int, filename: str, data: bytes) -> Dict[str, ob
     ext = detect_extension(filename)
     _validate_content(ext, data)
 
-    user_dir = os.path.join(config.UPLOAD_DIR, f"user_{int(user_id)}")
-    os.makedirs(user_dir, exist_ok=True)
-    stored_name = f"{uuid.uuid4().hex}{ext}"          # server-generated: no user input in the path
-    path = os.path.join(user_dir, stored_name)
-    with open(path, "wb") as f:
-        f.write(data)
+    key = f"user_{int(user_id)}/{uuid.uuid4().hex}{ext}"      # server-generated: no user input in the key
+    try:
+        backend = storage.get_storage()
+        ref = backend.put(key, data)
+    except storage.StorageError as e:
+        raise UploadError(f"File storage is unavailable: {e}", 503)
     return {
-        "file_path": path,
+        "file_path": ref,
+        "storage_backend": backend.name,
         "original_filename": safe_display_name(filename),
         "file_size": len(data),
         "upload_type": ext.lstrip("."),
     }
 
 
-def delete_stored_file(path: str) -> None:
-    """Delete a stored upload, but only if it really lives inside the upload directory."""
-    if not path:
-        return
-    root = os.path.realpath(config.UPLOAD_DIR)
-    real = os.path.realpath(path)
-    if os.path.commonpath([root, real]) == root and os.path.isfile(real):
-        os.remove(real)
+def delete_stored_file(ref: str, backend_name: str = "local") -> None:
+    """Delete a stored upload from the backend that holds it. Raises UploadError(502) on backend failure."""
+    try:
+        storage.get_storage(backend_name).delete(ref)
+    except storage.StorageError as e:
+        raise UploadError(str(e), 502)

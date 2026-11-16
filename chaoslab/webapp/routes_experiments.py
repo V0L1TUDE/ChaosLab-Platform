@@ -2,7 +2,7 @@
 
 from typing import Any, Dict
 
-from . import catalog, db, engine_bridge, runner_service
+from . import catalog, config, db, engine_bridge, runner_service
 from .execution import ORACLE_GROUPS, STAGES
 from .http_core import HttpError, json_response, router
 from .routes_apps import get_accessible_app
@@ -24,7 +24,7 @@ def get_own_experiment(conn, user_id: int, raw_id: str):
 
 @router.route("GET", "/api/capabilities")
 def capabilities(req):
-    return json_response({"modes": runner_service.capabilities(), "stages": [{"key": k, "label": l} for k, l in STAGES]})
+    return json_response({"storage": config.STORAGE_BACKEND, "modes": runner_service.capabilities(), "stages": [{"key": k, "label": l} for k, l in STAGES]})
 
 
 @router.route("GET", "/api/experiments")
