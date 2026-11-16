@@ -237,6 +237,7 @@ async function uploadApp(form) {
 
 async function pageAppDetail(id) {
   const {application: a} = await api('GET', `/api/applications/${id}`);
+  S.probes = a.probes || {};
   const cat = a.catalog;
   render(shell('#/apps', h`
     <div class="page-head"><div><a href="#/apps" class="small">← Applications</a>
@@ -252,6 +253,7 @@ async function pageAppDetail(id) {
     ${a.note ? h`<div class="banner info">${a.note}</div>` : ''}
     ${a.cluster ? h`<div class="banner ${a.cluster.online && !a.cluster.paused ? 'live' : 'info'}">Cluster <a href="#/clusters/${a.cluster.id}"><b>${a.cluster.name}</b></a>: agent ${a.cluster.paused ? 'paused (emergency stop)' : a.cluster.online ? 'online' : 'offline'}.</div>` : ''}
     ${a.deployment ? deploymentCard(a) : ''}
+    ${a.cluster && a.catalog ? probesCard(a) : ''}
     ${cat ? h`<div class="grid g2" style="align-items:start">
       <div class="card"><div class="card-title"><h2>Services (namespace <code>${cat.namespace}</code>)</h2></div>
         ${discoveryNote(cat.discovery, a.id)}
@@ -265,8 +267,8 @@ async function pageAppDetail(id) {
         <div class="card"><div class="card-title"><h2>Available experiments</h2></div>
           ${cat.faults.map(f => h`<div style="padding:8px 0;border-bottom:1px solid #1d2a42"><b>${f.label}</b> <span class="mono faint">${f.chaos_kind}</span>
             <div class="muted small">${f.description}</div></div>`)}
-          <h3 style="margin:14px 0 6px">Curated deep-verification experiments</h3>
-          <div class="muted small" style="margin-bottom:6px">Existing ChaosLab YAML experiments with application probes and telemetry (used by Live runs).</div>
+          ${cat.curated_experiments.length ? h`<h3 style="margin:14px 0 6px">Curated deep-verification experiments</h3>
+          <div class="muted small" style="margin-bottom:6px">Existing ChaosLab YAML experiments with application probes and telemetry (used by Live runs).</div>` : ''}
           ${cat.curated_experiments.map(c => h`<div class="small" style="padding:3px 0"><code>${c.service}</code> · ${c.fault}
             ${c.application_checks ? h`<span class="badge b-ready">APP PROBES</span>` : ''} ${c.telemetry_checks ? h`<span class="badge b-ready">TELEMETRY</span>` : ''}</div>`)}
         </div></div></div>` : ''}
@@ -295,6 +297,80 @@ function deploymentCard(a) {
       ${v.workloads.map(w => h`<tr><td class="mono">${w.name}</td><td class="mono small">${w.images.join(', ')}</td><td>${w.replicas}</td><td class="mono small">${w.ports.join(', ') || '-'}</td></tr>`)}</tbody></table></div>` : ''}
     ${a.status !== 'invalid' ? sandbox : ''}
   </div>`;
+}
+
+
+function probeSummary(p) {
+  const parts = [`health GET :${p.health.port}${p.health.path} → ${p.health.expected_status}`];
+  if (p.functional) parts.push(`functional GET :${p.functional.port}${p.functional.path} → ${p.functional.expected_status}`);
+  if (p.logs) parts.push('log checks');
+  return parts.join(' · ');
+}
+
+function probesCard(a) {
+  const services = a.catalog.targetable_services;
+  const configured = Object.entries(a.probes || {});
+  return h`<div class="card"><div class="card-title"><h2>Verification probes</h2></div>
+    <div class="muted small" style="margin-bottom:10px">After each Live experiment the agent checks that your application really works, using <b>read-only HTTP GET requests</b> to the pod (through a temporary local port-forward) and optional log checks. Nothing is executed inside your containers. A health check is required; without probes these invariants show N/A. The probe runs once <b>before</b> the fault: if it already fails, no fault is injected.</div>
+    ${configured.length ? h`<div style="margin-bottom:12px">${configured.map(([svc, p]) => h`<div class="svc-row" style="padding:6px 0;border-bottom:1px solid #1d2a42"><div><span class="mono"><b>${svc}</b></span><div class="muted small">${probeSummary(p)}</div></div>
+      <button class="btn danger sm" data-action="probes-remove" data-id="${a.id}" data-service="${svc}">Remove</button></div>`)}</div>` : ''}
+    ${services.length ? h`<div id="probe-error"></div>
+    <form data-form="probes" data-id="${a.id}" novalidate>
+      <div class="field"><label>Service</label><select name="service">${services.map(s => h`<option value="${s}">${s}${a.probes && a.probes[s] ? ' (configured)' : ''}</option>`)}</select></div>
+      <div class="grid g3">
+        <div class="field"><label>Health: port</label><input type="text" name="h_port" inputmode="numeric" placeholder="8080"></div>
+        <div class="field"><label>Health: path</label><input type="text" name="h_path" placeholder="/health"></div>
+        <div class="field"><label>Expected status</label><input type="text" name="h_status" inputmode="numeric" value="200"></div>
+      </div>
+      <div class="field"><label>Health response must contain (optional)</label><input type="text" name="h_contains" maxlength="100"></div>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="f_enable"> Also run a functional check (GET)</label>
+      <div class="grid g3" style="margin-top:8px">
+        <div class="field"><label>Functional: port</label><input type="text" name="f_port" inputmode="numeric"></div>
+        <div class="field"><label>Functional: path</label><input type="text" name="f_path" placeholder="/api/items?limit=1"></div>
+        <div class="field"><label>Expected status</label><input type="text" name="f_status" inputmode="numeric" value="200"></div>
+      </div>
+      <div class="field"><label>Functional response must contain (optional)</label><input type="text" name="f_contains" maxlength="100"></div>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="l_enable"> Check container logs</label>
+      <div class="grid g2" style="margin-top:8px">
+        <div class="field"><label>Logs must contain (startup text)</label><input type="text" name="l_expected" maxlength="100" placeholder="Application started"></div>
+        <div class="field"><label>Logs must NOT contain (comma separated)</label><input type="text" name="l_prohibited" placeholder="panic:, fatal error"></div>
+      </div>
+      <button class="btn primary" type="submit">Save probes for this service</button>
+    </form>` : h`<div class="empty">No targetable services reported yet.</div>`}
+  </div>`;
+}
+
+function fillProbeForm(form, svc) {
+  const p = (S.probes || {})[svc], set = (n, v) => { form[n].value = v == null ? '' : v; };
+  set('h_port', p && p.health.port); set('h_path', p && p.health.path); set('h_status', p ? p.health.expected_status : 200);
+  set('h_contains', p && p.health.expected_body_contains);
+  form.f_enable.checked = !!(p && p.functional);
+  set('f_port', p && p.functional && p.functional.port); set('f_path', p && p.functional && p.functional.path);
+  set('f_status', p && p.functional ? p.functional.expected_status : 200); set('f_contains', p && p.functional && p.functional.expected_body_contains);
+  form.l_enable.checked = !!(p && p.logs);
+  set('l_expected', p && p.logs && p.logs.expected_log_pattern); set('l_prohibited', p && p.logs ? p.logs.prohibited_patterns.join(', ') : '');
+}
+
+async function saveProbes(form) {
+  const box = document.getElementById('probe-error'); box.innerHTML = '';
+  const fail = m => { box.innerHTML = h`<div class="banner err">${m}</div>`.s; };
+  const num = v => (/^\d+$/.test(String(v).trim()) ? +v : NaN);
+  const health = {port: num(form.h_port.value), path: form.h_path.value.trim(), expected_status: num(form.h_status.value)};
+  if (form.h_contains.value.trim()) health.expected_body_contains = form.h_contains.value.trim();
+  const probes = {health};
+  if (form.f_enable.checked) {
+    probes.functional = {port: num(form.f_port.value), path: form.f_path.value.trim(), expected_status: num(form.f_status.value)};
+    if (form.f_contains.value.trim()) probes.functional.expected_body_contains = form.f_contains.value.trim();
+  }
+  if (form.l_enable.checked) {
+    probes.logs = {prohibited_patterns: form.l_prohibited.value.split(',').map(x => x.trim()).filter(Boolean)};
+    if (form.l_expected.value.trim()) probes.logs.expected_log_pattern = form.l_expected.value.trim();
+  }
+  try {
+    await api('POST', `/api/applications/${form.dataset.id}/probes`, {service: form.service.value, probes});
+    toast('Probes saved.', 'ok');
+    await pageAppDetail(+form.dataset.id);
+  } catch (e) { fail(e.message); }
 }
 
 /* ---------- service discovery status ---------- */
@@ -672,6 +748,11 @@ async function registerClusterApp(form) {
   } catch (e) { box.innerHTML = h`<div class="banner err">${e.message}</div>`.s; }
 }
 
+document.addEventListener('change', ev => {
+  const form = ev.target.closest && ev.target.closest('form[data-form=probes]');
+  if (form && ev.target.name === 'service') fillProbeForm(form, ev.target.value);
+});
+
 document.addEventListener('input', ev => {
   if (ev.target.id === 'enroll-ns') {
     const ns = ev.target.value.replace(/\s+/g, '') || 'default';
@@ -697,6 +778,9 @@ document.addEventListener('click', async ev => {
       toast('Application deleted.', 'ok');
       if (el.dataset.then === 'apps') location.hash = '#/apps'; else await pageApps();
     } catch (e) { toast(e.message, 'err'); }
+  } else if (action === 'probes-remove') {
+    try { await api('POST', `/api/applications/${el.dataset.id}/probes`, {service: el.dataset.service, probes: null}); toast('Probes removed.', 'ok'); await pageAppDetail(+el.dataset.id); }
+    catch (e) { toast(e.message, 'err'); }
   } else if (action === 'copy-cmd') {
     const pre = document.getElementById('enroll-cmd');
     try { await navigator.clipboard.writeText(pre.textContent); toast('Command copied.', 'ok'); } catch (e) { toast('Select the command and copy it manually.', 'err'); }
@@ -745,6 +829,7 @@ document.addEventListener('submit', ev => {
   else if (kind === 'upload') uploadApp(form);
   else if (kind === 'cluster-create') createCluster(form);
   else if (kind === 'cluster-app') registerClusterApp(form);
+  else if (kind === 'probes') saveProbes(form);
   else if (kind === 'experiment') window.__runExperiment && window.__runExperiment();
 });
 

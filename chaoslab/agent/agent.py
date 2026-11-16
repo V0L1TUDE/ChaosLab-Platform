@@ -7,6 +7,9 @@ Design (security first)
   * Jobs are DATA, never commands. The server sends a declarative experiment config; the agent re-validates it
     against its OWN local policy (allowed namespaces, faults, max duration) and rebuilds a minimal config.
     A compromised or buggy server cannot make the agent touch other namespaces or run arbitrary commands.
+  * Application probes are declarative and read-only (HTTP GET through a local port-forward, log substring checks);
+    the engine's own exec-based probes stay disabled. Probes run BEFORE the fault (so a misconfigured probe never
+    causes an outage for nothing) and again after recovery.
   * Least privilege: it only needs kubectl access with the Role in agent-rbac.yaml (see README).
   * It sends back evidence (pod names, readiness, Chaos Mesh status, Kubernetes events), never kubeconfig,
     secrets or workload data. The server verifies the evidence with its own Verification Oracle.
@@ -34,13 +37,16 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 DNS_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 DURATION_RE = re.compile(r"^(\d{1,3})s$")
 LATENCY_RE = re.compile(r"^\d{1,4}(ms|s)$")
 ENGINE_FAULTS = ("pod-kill", "network-delay", "network-loss")
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import safe_probes  # noqa: E402  (HTTP GET / log probes: no exec, no scripts)
 
 
 def log(msg: str) -> None:
@@ -49,7 +55,8 @@ def log(msg: str) -> None:
 
 # ============================================================================ local policy (authoritative)
 class Policy:
-    def __init__(self, namespaces: List[str], faults: Tuple[str, ...] = ENGINE_FAULTS, max_duration: int = 120):
+    def __init__(self, namespaces: List[str], faults: Tuple[str, ...] = ENGINE_FAULTS, max_duration: int = 120,
+                 allow_probes: bool = True):
         bad = [n for n in namespaces if not DNS_LABEL.match(n)]
         if not namespaces:
             raise ValueError("allowed namespaces must be a non-empty list of valid namespace names")
@@ -59,13 +66,14 @@ class Policy:
         self.namespaces = sorted(set(namespaces))
         self.faults = tuple(f for f in faults if f in ENGINE_FAULTS)
         self.max_duration = max_duration
+        self.allow_probes = allow_probes
 
 
 def validate_job(job: Dict[str, Any], policy: Policy) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
     Returns (sanitized_engine_config, None) or (None, reason). The sanitized config is REBUILT from whitelisted
-    fields; anything else the server sent is dropped. Application probes and telemetry are always disabled:
-    probe configs can contain exec commands, so this agent never runs them.
+    fields; anything else the server sent is dropped. The engine's own application probes and telemetry stay
+    disabled (they can carry exec commands); only the validated declarative `probes` run, via safe_probes.
     """
     try:
         cfg = job["engine_config"]
@@ -112,9 +120,17 @@ def validate_job(job: Dict[str, Any], policy: Policy) -> Tuple[Optional[Dict[str
         runtime = job.get("max_runtime_seconds", 300)
         if not (isinstance(runtime, int) and 30 <= runtime <= 1800):
             return None, "invalid max_runtime_seconds"
+        # Declarative probes (HTTP GET + logs) are validated against the agent's own strict whitelist. The engine's
+        # exec-based probes are never enabled; `probes` is an agent-internal key executed by safe_probes.
+        probes = None
+        app_cfg = cfg.get("application")
+        if policy.allow_probes and isinstance(app_cfg, dict) and app_cfg.get("enabled") and "probes" in app_cfg:
+            probes, perr = safe_probes.validate_probe_spec(app_cfg["probes"])
+            if perr:
+                return None, f"invalid probe spec: {perr}"
         return {"name": name, "target": {"namespace": ns, "label": {"app": label["app"]}}, "fault": clean_fault,
                 "recovery": {"timeout_seconds": timeout, "expected_ready_replicas": replicas},
-                "application": {"enabled": False}, "telemetry": {"enabled": False}}, None
+                "application": {"enabled": False}, "telemetry": {"enabled": False}, "probes": probes}, None
     except (KeyError, TypeError, ValueError) as e:
         return None, f"malformed job: {type(e).__name__}"
 
@@ -258,6 +274,23 @@ def engine_executor(job: Dict[str, Any], cfg: Dict[str, Any], reporter: Reporter
     """Run the real ChaosLab engine against the local cluster. Returns {report}|{error}|{cancelled}."""
     import yaml
     eng = _engine(verifier_dir)
+    probes = cfg.get("probes")
+    cfg = {k: v for k, v in cfg.items() if k != "probes"}          # the engine never sees probe settings
+    ns_, svc_ = cfg["target"]["namespace"], cfg["target"]["label"]["app"]
+    pre_probe: Dict[str, Any] = {}
+    if probes:
+        # Pre-flight: a broken probe config or an unhealthy app must be reported BEFORE any fault is injected.
+        reporter.event("baseline", "Pre-flight: probing the application before injecting any fault...", 5)
+        reporter.flush()
+        pre_probe = safe_probes.run_probes(probes, ns_, svc_, kubectl, wait_seconds=10)
+        func_ok = pre_probe.get("functional_test_passed") or pre_probe.get("functional_test_skipped")
+        if not (pre_probe["health_check_passed"] and func_ok):
+            h = pre_probe.get("health_details", {}).get("detail") or pre_probe.get("health_status")
+            f = (pre_probe.get("functional_details") or {}).get("detail") or ""
+            return {"error": "Pre-flight probe failed, so NO fault was injected. "
+                             f"Health: {h}. " + (f"Functional: {f}. " if f and not pre_probe.get("functional_test_passed") else "")
+                             + "Fix the probe settings or the application and try again."}
+        reporter.event("baseline", f"Pre-flight probes passed (health {pre_probe['health_details'].get('latency_ms')} ms).", 8)
     work = tempfile.mkdtemp(prefix="chaoslab-agent-")
     cfg_path = os.path.join(work, "experiment.yaml")
     with open(cfg_path, "w", encoding="utf-8") as f:
@@ -293,7 +326,17 @@ def engine_executor(job: Dict[str, Any], cfg: Dict[str, Any], reporter: Reporter
     sampler_thread.start()
     runner.start()
     try:
-        return _supervise(eng, cfg, job, reporter, runner, sampler_thread, stop, state, started)
+        outcome = _supervise(eng, cfg, job, reporter, runner, sampler_thread, stop, state, started)
+        if probes and outcome.get("report") and not reporter.cancelled.is_set():
+            reporter.event("verification", "Probing the application after the experiment (waiting for it to recover)...", 85)
+            reporter.flush()
+            post = safe_probes.run_probes(probes, ns_, svc_, kubectl, wait_seconds=25)
+            post["baseline"] = {"health_passed": pre_probe.get("health_check_passed"),
+                                "latency_ms": (pre_probe.get("health_details") or {}).get("latency_ms")}
+            outcome["report"]["application"] = post
+            reporter.event("verification", f"Post-experiment probes: health {post['health_status']}"
+                           f"{', functional ' + ('OK' if post['functional_test_passed'] else 'FAILED') if 'functional' in probes else ''}.", 92)
+        return outcome
     finally:
         # the engine writes reports into `work`; they are not needed (evidence was sent to the server)
         threading.Timer(15.0, shutil.rmtree, args=(work,), kwargs={"ignore_errors": True}).start()
@@ -471,6 +514,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--allowed-faults", default=os.environ.get("CHAOSLAB_ALLOWED_FAULTS", ",".join(ENGINE_FAULTS)))
     p.add_argument("--max-duration", type=int, default=int(os.environ.get("CHAOSLAB_MAX_DURATION", "120")))
     p.add_argument("--state-dir", default=os.environ.get("CHAOSLAB_STATE_DIR", os.path.join(os.path.expanduser("~"), ".chaoslab-agent")))
+    p.add_argument("--no-probes", action="store_true", default=os.environ.get("CHAOSLAB_ALLOW_PROBES", "1") in ("0", "false", "no"),
+                   help="never run application probes (jobs asking for them just get no application evidence)")
     p.add_argument("--insecure-allow-http", action="store_true", help="allow plain HTTP to a non-local server (testing only)")
     p.add_argument("--verifier-dir", default=None, help="path to chaoslab/verifier (default: auto-detected)")
     args = p.parse_args(argv)
@@ -479,7 +524,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         p.error("--server and --allowed-namespaces are required")
     try:
         policy = Policy([n.strip() for n in args.allowed_namespaces.split(",") if n.strip()],
-                        tuple(f.strip() for f in args.allowed_faults.split(",") if f.strip()), args.max_duration)
+                        tuple(f.strip() for f in args.allowed_faults.split(",") if f.strip()), args.max_duration,
+                        allow_probes=not args.no_probes)
         api = Api(args.server, args.insecure_allow_http)
     except ValueError as e:
         p.error(str(e))
@@ -511,7 +557,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     except (AttributeError, ValueError):
         pass
     log(f"ChaosLab agent {VERSION} running. Server: {api.base}. Namespaces: {', '.join(policy.namespaces)}. "
-        f"Faults: {', '.join(policy.faults)}. Max duration: {policy.max_duration}s. Outbound-only.")
+        f"Faults: {', '.join(policy.faults)}. Max duration: {policy.max_duration}s. "
+        f"Probes: {'safe HTTP GET/log probes' if policy.allow_probes else 'disabled'}. Outbound-only.")
     return agent.run_forever()
 
 
