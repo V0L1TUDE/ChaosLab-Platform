@@ -448,7 +448,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 app_id = path.split("/")[4]
                 if payload.get("fault_type", "pod-kill") != "pod-kill":
                     raise ApplicationError("Only pod-kill drafts are supported in this MVP")
-                return self._write_json(201, {"experiment": registry.generate_experiment(app_id)})
+                return self._write_json(201, {"experiment": registry.generate_experiment(app_id, health_probe=payload.get("health_probe"))})
             except ApplicationError as error:
                 return self._write_json(400, {"error": str(error)})
 

@@ -62,6 +62,28 @@ def validate_registration(payload: dict) -> dict:
             "namespace": namespace, "app_label": app_label, "expected_replicas": replicas}
 
 
+def validate_health_probe(spec: object) -> dict | None:
+    """Onboarding supports a bounded GET to the selected pod's localhost only."""
+    if spec is None:
+        return None
+    if not isinstance(spec, dict) or set(spec) - {"type", "path", "port", "expected_status", "timeout"}:
+        raise ApplicationError("Health check must specify only type, path, port, expected_status and timeout")
+    if spec.get("type", "http") != "http":
+        raise ApplicationError("Only HTTP health checks are supported by onboarding")
+    path = spec.get("path", "/")
+    if (not isinstance(path, str) or not path.startswith("/") or path.startswith("//")
+            or len(path) > 256 or any(ord(c) < 33 or ord(c) > 126 for c in path)
+            or "#" in path or "\\" in path):
+        raise ApplicationError("Health path must be a local URL path, such as /health")
+    result = {"type": "http", "path": path}
+    for field, default, low, high in (("port", 8080, 1, 65535), ("expected_status", 200, 200, 299), ("timeout", 5, 1, 10)):
+        value = spec.get(field, default)
+        if type(value) is not int or not low <= value <= high:
+            raise ApplicationError(f"Health {field} must be an integer from {low} to {high}")
+        result[field] = value
+    return result
+
+
 class ApplicationRegistry:
     def __init__(self, database_path: str | Path = DEFAULT_DB, experiments_dir: str | Path = EXPERIMENTS_DIR):
         self.database_path = Path(database_path)
@@ -142,10 +164,11 @@ class ApplicationRegistry:
                 "ready_count": ready_count, "expected_replicas": app["expected_replicas"],
                 "workload_ready": ready_count >= app["expected_replicas"]}
 
-    def generate_experiment(self, app_id: str) -> dict:
+    def generate_experiment(self, app_id: str, health_probe: dict | None = None) -> dict:
         app = self.get(app_id)
         if app["namespace"] not in allowed_namespaces():
             raise ApplicationError("Namespace no longer permitted")
+        health_probe = validate_health_probe(health_probe)
         # A draft configuration, NOT a fault-execution command.
         name = f"registered-{app['id']}-pod-kill"
         payload = {
@@ -154,7 +177,8 @@ class ApplicationRegistry:
             "target": {"namespace": app["namespace"], "label": {"app": app["app_label"]}},
             "fault": {"type": "pod-kill", "mode": "one"},
             "recovery": {"timeout_seconds": 60, "expected_ready_replicas": app["expected_replicas"]},
-            "application": {"enabled": False},
+            "application": ({"enabled": True, "health_probe": health_probe}
+                            if health_probe else {"enabled": False}),
             "telemetry": {"enabled": False},
         }
         validate_experiment_config(payload)

@@ -70,17 +70,18 @@ class HttpProber:
         # Probe via in-container python / curl inside the pod
         # Python probe script executed inside the container
         python_script = (
-            "import urllib.request, json, sys; "
-            f"req = urllib.request.Request('{target_url}', method='{method}'); "
+            "import urllib.request, urllib.error, json, sys\n"
+            f"req = urllib.request.Request({target_url!r}, method={method!r})\n"
             "try:\n"
             f"    with urllib.request.urlopen(req, timeout={timeout}) as resp:\n"
-            "        body = resp.read().decode('utf-8', errors='ignore'); "
-            "        print(json.dumps({'status': resp.status, 'body': body})); sys.exit(0)\n"
+            "        body = resp.read().decode('utf-8', errors='ignore')\n"
+            "        print(json.dumps({'status': resp.status, 'body': body}))\n"
             "except urllib.error.HTTPError as e:\n"
-            "    body = e.read().decode('utf-8', errors='ignore'); "
-            "    print(json.dumps({'status': e.code, 'body': body})); sys.exit(0)\n"
+            "    body = e.read().decode('utf-8', errors='ignore')\n"
+            "    print(json.dumps({'status': e.code, 'body': body}))\n"
             "except Exception as e:\n"
-            "    print(json.dumps({'error': str(e)})); sys.exit(1)"
+            "    print(json.dumps({'error': str(e)}))\n"
+            "    sys.exit(1)\n"
         )
 
         res = run_command([
@@ -91,7 +92,7 @@ class HttpProber:
         if res.returncode != 0 and "error" not in res.stdout:
             curl_cmd = [
                 "kubectl", "exec", pod_name, "-n", namespace, "--",
-                "curl", "-s", "-w", "\n{\"status\": %{http_code}}", "-X", method, target_url
+                "curl", "-sS", "--max-time", str(timeout), "--connect-timeout", str(timeout), "-w", "\n{\"status\": %{http_code}}", "-X", method, target_url
             ]
             curl_res = run_command(curl_cmd, timeout=timeout + 5)
             if curl_res.returncode == 0:
