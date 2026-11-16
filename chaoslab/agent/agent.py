@@ -390,6 +390,7 @@ class Agent:
         self.api, self.policy, self.state_file = api, policy, state_file
         self.executor, self.cluster_probe, self.inventory_fn = executor, cluster_probe, inventory_fn
         self.poll_wait = poll_wait
+        self.paused_backoff = 3.0
         self.cred: Optional[Dict[str, Any]] = None
         self.cluster_uid: Optional[str] = None
         self.kube_version = ""
@@ -448,8 +449,14 @@ class Agent:
             if self.current_reporter.job["job_id"] in reply.get("cancel", []):
                 log("Emergency stop received: aborting the running experiment.")
                 self.current_reporter.cancelled.set()
-        if reply.get("paused"):
-            log("Cluster is paused (emergency stop active). Not accepting jobs.")
+        paused = bool(reply.get("paused"))
+        if paused and not getattr(self, "_was_paused", False):
+            log("Cluster is paused (emergency stop active). Not accepting jobs until it is resumed.")
+        elif not paused and getattr(self, "_was_paused", False):
+            log("Cluster resumed. Accepting jobs again.")
+        self._was_paused = paused
+        if paused:
+            self.stop.wait(self.paused_backoff)            # never spin against the server while paused
         job = reply.get("job")
         if job and not busy:
             self.start_job(job)
