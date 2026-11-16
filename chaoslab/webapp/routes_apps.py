@@ -19,11 +19,18 @@ def app_to_dict(row, experiments_count: int = 0) -> Dict[str, Any]:
         "is_builtin": builtin,
         "original_filename": row["original_filename"],
         "file_size": row["file_size"],
-        "executable": builtin or row["status"] in ("validated", "deployed"),   # can run experiments
+        "executable": builtin or row["status"] in ("validated", "deployed") or bool(row["cluster_id"]),   # can run experiments
         "deployable": (not builtin) and row["status"] in ("validated", "deploy_failed"),
         "experiments_count": experiments_count,
     }
     d["slug"] = row["slug"]
+    d["cluster_id"] = row["cluster_id"]
+    if row["cluster_id"]:
+        d["namespace"] = row["namespace"]
+        with db.session() as c2:
+            cl = c2.execute("SELECT name, status FROM clusters WHERE id = ?", (row["cluster_id"],)).fetchone()
+        d["cluster_name"] = cl["name"] if cl else None
+        d["executable"] = bool(cl and cl["status"] != "revoked")
     if not builtin and row["validation_json"]:
         v = json.loads(row["validation_json"])
         d["validation"] = {"valid": v["valid"], "errors": v["errors"], "warnings": v["warnings"]}
@@ -125,7 +132,16 @@ def application_detail(req):
         data["catalog"] = catalog.describe_app(catalog.get_builtin(row["slug"]), force=req.qs("refresh") == "1")
     else:
         resolved = catalog.resolve_app(row)
-        if resolved:
+        if row["cluster_id"]:
+            data["note"] = ("This application runs in your own cluster. Experiments are executed by the ChaosLab agent "
+                            "inside that cluster; nothing is deployed or changed by this server.")
+            if resolved:
+                data["catalog"] = catalog.describe_app(resolved)
+                data["cluster"] = {"id": resolved["cluster_id"], "name": resolved["cluster_name"],
+                                   "online": resolved["cluster_online"], "paused": resolved["cluster_paused"]}
+            else:
+                data["note"] = "The cluster for this application was removed. Past experiments and reports are kept."
+        elif resolved:
             data["catalog"] = catalog.describe_app(resolved, force=req.qs("refresh") == "1")
             data["deployment"] = deployments.deployment_info(row)
         elif row["status"] == "invalid":

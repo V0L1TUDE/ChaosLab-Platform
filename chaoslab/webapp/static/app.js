@@ -61,7 +61,7 @@ function verdictBadge(v, simulated) {
 /* ---------- router ---------- */
 const NAV = [
   ['#/', 'Dashboard', '▦'], ['#/apps', 'Applications', '⬡'], ['#/experiments/new', 'New experiment', '⚡'],
-  ['#/reports', 'Reports', '▤'], ['#/oracle', 'Verification Oracle', '✓'],
+  ['#/clusters', 'Clusters', '☁'], ['#/reports', 'Reports', '▤'], ['#/oracle', 'Verification Oracle', '✓'],
 ];
 
 function shell(active, content) {
@@ -103,6 +103,8 @@ async function route() {
     if ((m = path.match(/^#\/apps\/(\d+)$/))) return await pageAppDetail(+m[1]);
     if (path === '#/experiments/new') return await pageNewExperiment(qs.get('app'));
     if ((m = path.match(/^#\/experiments\/(\d+)$/))) return await pageMonitor(+m[1]);
+    if (path === '#/clusters') return await pageClusters();
+    if ((m = path.match(/^#\/clusters\/(\d+)$/))) return await pageClusterDetail(+m[1]);
     if (path === '#/reports') return await pageReports();
     if (path === '#/oracle') return await pageOracle(qs.get('exp'));
     render(shell('', h`<div class="empty">Page not found. <a href="#/">Back to dashboard</a></div>`));
@@ -245,9 +247,10 @@ async function pageAppDetail(id) {
       <div class="stat"><div class="l">Services</div><div class="v">${cat ? cat.services_count : 'n/a'}</div><div class="s">${cat ? (cat.discovery.source === 'cluster' ? 'discovered from the cluster' : (a.is_builtin ? 'static list (cluster unavailable)' : 'from your manifests (not deployed)')) : 'no services (not a valid manifest upload)'}</div></div>
       <div class="stat"><div class="l">Experiments</div><div class="v">${a.experiments_count}</div><div class="s">your runs on this app</div></div>
       <div class="stat"><div class="l">Fault types</div><div class="v">${cat ? cat.faults.length : 'n/a'}</div><div class="s">${cat ? 'pod kill, network delay, network failure' : ''}</div></div>
-      <div class="stat"><div class="l">Registered</div><div class="v" style="font-size:16px;padding-top:8px">${fmtDate(a.created_at)}</div><div class="s">${a.is_builtin ? 'preconfigured' : a.original_filename + ' · ' + fmtBytes(a.file_size)}</div></div>
+      <div class="stat"><div class="l">Registered</div><div class="v" style="font-size:16px;padding-top:8px">${fmtDate(a.created_at)}</div><div class="s">${a.is_builtin ? 'preconfigured' : a.cluster_id ? `your cluster · ns ${a.namespace}` : a.original_filename + ' · ' + fmtBytes(a.file_size)}</div></div>
     </div>
     ${a.note ? h`<div class="banner info">${a.note}</div>` : ''}
+    ${a.cluster ? h`<div class="banner ${a.cluster.online && !a.cluster.paused ? 'live' : 'info'}">Cluster <a href="#/clusters/${a.cluster.id}"><b>${a.cluster.name}</b></a>: agent ${a.cluster.paused ? 'paused (emergency stop)' : a.cluster.online ? 'online' : 'offline'}.</div>` : ''}
     ${a.deployment ? deploymentCard(a) : ''}
     ${cat ? h`<div class="grid g2" style="align-items:start">
       <div class="card"><div class="card-title"><h2>Services (namespace <code>${cat.namespace}</code>)</h2></div>
@@ -297,9 +300,12 @@ function deploymentCard(a) {
 /* ---------- service discovery status ---------- */
 function discoveryNote(d, refreshId) {
   const refresh = refreshId ? h` <button class="btn sm" data-action="refresh-services" data-id="${refreshId}">Refresh</button>` : '';
+  if (d.source === 'agent') {
+    return h`<div class="banner live" style="margin:10px 0 0">Services reported by the ChaosLab agent in your cluster at ${fmtTime(d.discovered_at)}.${refresh}</div>`;
+  }
   return d.source === 'cluster'
     ? h`<div class="banner live" style="margin:10px 0 0">Services discovered from the Kubernetes cluster at ${fmtTime(d.discovered_at)}.${refresh}</div>`
-    : h`<div class="banner info" style="margin:10px 0 0">Static service list (cluster discovery unavailable: ${d.error}). Live execution is disabled for this application.${refresh}</div>`;
+    : h`<div class="banner info" style="margin:10px 0 0">Static service list (${d.error}). Live execution is disabled for this application.${refresh}</div>`;
 }
 
 /* ---------- new experiment ---------- */
@@ -317,8 +323,8 @@ async function pageNewExperiment(appParam) {
 
   const draw = () => {
     const fault = cat.faults.find(f => f.id === form.fault);
-    const liveOk = modes.live.available && cat.discovery.source === 'cluster';
-    const liveWhy = !modes.live.available ? modes.live.reason : (current.is_builtin ? 'This application was not found in the cluster (service list is static).' : 'Deploy this application to the sandbox first (Applications page).');
+    const liveOk = current.cluster_id ? cat.discovery.source === 'agent' : (modes.live.available && cat.discovery.source === 'cluster');
+    const liveWhy = current.cluster_id ? (cat.discovery.error || 'Agent unavailable.') : !modes.live.available ? modes.live.reason : (current.is_builtin ? 'This application was not found in the cluster (service list is static).' : 'Deploy this application to the sandbox first (Applications page).');
     if (form.mode === 'live' && !liveOk) form.mode = 'simulated';
     const choice = (name, value, title, sub, selected, disabled) => h`<label class="choice ${selected ? 'sel' : ''} ${disabled ? 'disabled' : ''}">
       <input type="radio" name="${name}" value="${value}" ${selected ? 'checked' : ''} ${disabled ? 'disabled' : ''}>${title}<small>${sub}</small></label>`;
@@ -328,7 +334,7 @@ async function pageNewExperiment(appParam) {
       <div class="grid" style="grid-template-columns:2fr 1fr;align-items:start">
       <form data-form="experiment" id="exp-form">
         <div class="card"><h3><span class="step-n">1</span>Application</h3>
-          <div class="choices" style="margin-top:10px">${builtins.map(a => choice('app', a.id, a.name, a.is_builtin ? `${a.services_count} services · preconfigured` : `your upload · ${a.status}`, a.id === current.id, false))}</div></div>
+          <div class="choices" style="margin-top:10px">${builtins.map(a => choice('app', a.id, a.name, a.is_builtin ? `${a.services_count} services · preconfigured` : a.cluster_id ? `your cluster · ${a.cluster_name}` : `your upload · ${a.status}`, a.id === current.id, false))}</div></div>
         <div class="card"><h3><span class="step-n">2</span>Target microservice</h3>
           ${discoveryNote(cat.discovery)}
           <div class="choices" style="margin-top:10px">${cat.services.filter(s => s.targetable).map(s =>
@@ -341,10 +347,10 @@ async function pageNewExperiment(appParam) {
           <div class="hint">${fault.duration_meaning}</div></div>
         <div class="card"><h3><span class="step-n">5</span>Execution mode</h3>
           <div class="choices" style="margin-top:10px;grid-template-columns:1fr 1fr">
-            ${choice('mode', 'live', 'Live execution', liveOk ? 'Real Chaos Mesh fault on the cluster' : liveWhy, form.mode === 'live', !liveOk)}
+            ${choice('mode', 'live', 'Live execution', liveOk ? (current.cluster_id ? 'Real fault in your cluster, run by your agent' : 'Real Chaos Mesh fault on the cluster') : liveWhy, form.mode === 'live', !liveOk)}
             ${choice('mode', 'simulated', 'Demo execution (SIMULATED)', 'Predefined data, nothing is injected', form.mode === 'simulated', false)}
           </div>
-          ${form.mode === 'live' ? h`<div class="banner live" style="margin:12px 0 0">Live mode really injects the fault into the shared demo cluster using Chaos Mesh. Only one live experiment can run at a time.</div>`
+          ${form.mode === 'live' ? h`<div class="banner live" style="margin:12px 0 0">${current.cluster_id ? 'Live mode really injects the fault into YOUR cluster. The ChaosLab agent running there performs it (within its local allow-list) and sends back evidence.' : 'Live mode really injects the fault into the shared demo cluster using Chaos Mesh. Only one live experiment can run at a time.'}</div>`
             : h`<div class="banner sim" style="margin:12px 0 0">Demo mode plays predefined results. No fault is injected and every metric and invariant is labelled SIMULATED.</div>`}
         </div>
       </form>
@@ -456,6 +462,7 @@ async function pageMonitor(id) {
           ${e.reports.includes('engine-html') ? h`<a class="btn" href="/api/experiments/${e.id}/report?format=engine-html" target="_blank" rel="noopener">Engine report</a>` : ''}
           <a class="btn" href="#/oracle?exp=${e.id}">Oracle view</a></div></div>
       ${sim ? h`<div class="banner sim">⚠ SIMULATED EXECUTION: all events, metrics and invariant outcomes on this page are predefined demonstration data. No fault was injected into Kubernetes.</div>`
+            : e.cluster ? h`<div class="banner live">LIVE EXECUTION on your cluster <b>${e.cluster.name}</b>: the ChaosLab agent injected the fault and collected the evidence; this server verified it with the Oracle.</div>`
             : h`<div class="banner live">LIVE EXECUTION: data below was collected by the ChaosLab engine from Chaos Mesh and Kubernetes.</div>`}
       ${e.status === 'failed' ? h`<div class="banner err"><div><b>Execution failed.</b> ${e.error || ''}<br><span class="small">The Oracle did not produce a verdict; this is not a pass.</span></div></div>` : ''}
       <div class="card ${sim ? 'sim-stripe' : ''}">
@@ -560,6 +567,119 @@ async function pageOracle(expParam) {
   if (sel) sel.addEventListener('change', () => { location.hash = `#/oracle?exp=${sel.value}`; });
 }
 
+
+/* ---------- clusters (bring your own cluster via the ChaosLab agent) ---------- */
+function enrollPanel(c, e) {
+  const cmd = ns => `python agent.py --server ${e.server_url} --token ${e.token} --allowed-namespaces ${ns}`;
+  return h`<div class="card"><div class="card-title"><h2>Connect your agent</h2></div>
+    <div class="banner info"><div>This token is shown <b>once</b> and works <b>once</b> (expires ${fmtTime(e.expires_at)}). The agent exchanges it for a revocable credential. It makes outbound calls only: nothing connects in to your cluster.</div></div>
+    <div class="field"><label>Namespaces the agent is allowed to test (comma separated). The agent enforces this list itself.</label>
+      <input type="text" id="enroll-ns" value="default" data-server="${e.server_url}" data-token="${e.token}"></div>
+    <label>Run on a machine (or pod) where <code>kubectl</code> can reach your cluster, from <code>chaoslab/agent</code>:</label>
+    <pre class="log" id="enroll-cmd" style="white-space:pre-wrap;word-break:break-all">${cmd('default')}</pre>
+    <div class="actions" style="margin-top:10px"><button class="btn sm" data-action="copy-cmd">Copy command</button>
+      <span class="muted small">Needs Python 3, PyYAML, kubectl and Chaos Mesh in your cluster. See <code>chaoslab/agent/README.md</code> (Docker image and RBAC included).</span></div>
+  </div>`;
+}
+
+async function pageClusters() {
+  const {clusters} = await api('GET', '/api/clusters');
+  render(shell('#/clusters', h`
+    <div class="page-head"><div><h1>Clusters</h1><p>Connect your own Kubernetes cluster with the ChaosLab agent. Experiments run inside your environment; this site only sends approved instructions and receives evidence.</p></div></div>
+    <div class="grid" style="grid-template-columns:3fr 2fr;align-items:start">
+      <div class="card"><div class="card-title"><h2>Your clusters</h2></div>
+        ${clusters.length ? h`<div class="table-wrap"><table><thead><tr><th>Name</th><th>State</th><th>Namespaces</th><th>Apps</th><th>Last seen</th></tr></thead><tbody>
+          ${clusters.map(c => h`<tr class="click" data-href="#/clusters/${c.id}"><td><a href="#/clusters/${c.id}"><b>${c.name}</b></a><div class="muted small">${c.kube_version || ''} ${c.agent_version ? 'agent ' + c.agent_version : ''}</div></td>
+            <td>${statusBadge(c.state)}</td><td class="mono small">${c.allowed_namespaces.join(', ') || '-'}</td><td>${c.applications_count}</td>
+            <td class="muted small">${c.last_seen ? fmtDate(c.last_seen) : 'never'}</td></tr>`)}</tbody></table></div>`
+          : h`<div class="empty">No clusters connected yet.</div>`}</div>
+      <div class="card"><div class="card-title"><h2>Connect a cluster</h2></div>
+        <div id="cluster-error"></div>
+        <form data-form="cluster-create" novalidate>
+          <div class="field"><label>Cluster name</label><input type="text" name="name" maxlength="60" placeholder="e.g. staging" required></div>
+          <button class="btn primary" type="submit">Create enrollment token</button>
+        </form>
+        <div class="muted small" style="margin-top:12px">Safety: you choose which namespaces the agent may touch; every experiment is checked again by the agent locally; you can press <b>Emergency stop</b> at any time.</div>
+      </div></div>`));
+  if (clusters.some(c => c.state === 'online' || c.state === 'pending')) {
+    const t = setTimeout(() => { if (location.hash === '#/clusters') route(); }, 5000);
+    S.cleanup = () => clearTimeout(t);
+  }
+}
+
+async function createCluster(form) {
+  const box = document.getElementById('cluster-error'); box.innerHTML = '';
+  try {
+    const r = await api('POST', '/api/clusters', {name: form.name.value});
+    S.enroll = {id: r.cluster.id, ...r.enrollment};
+    location.hash = `#/clusters/${r.cluster.id}`;
+  } catch (e) { box.innerHTML = h`<div class="banner err">${e.message}</div>`.s; }
+}
+
+async function pageClusterDetail(id) {
+  const {cluster: c} = await api('GET', `/api/clusters/${id}`);
+  const enroll = S.enroll && S.enroll.id === id && c.state === 'pending' ? S.enroll : null;
+  if (c.state !== 'pending') S.enroll = null;
+  render(shell('#/clusters', h`
+    <div class="page-head"><div><a href="#/clusters" class="small">← Clusters</a>
+      <h1>${c.name} ${statusBadge(c.state)}</h1>
+      <p>${c.state === 'pending' ? 'Waiting for the agent to connect.' : c.state === 'revoked' ? 'This cluster was removed. Its history is kept.' : `Agent ${c.agent_version || ''} · Kubernetes ${c.kube_version || '?'} · last seen ${c.last_seen ? fmtDate(c.last_seen) : 'never'}`}</p></div>
+      <div class="actions">
+        ${c.status === 'connected' && !c.paused ? h`<button class="btn danger" data-action="cluster-stop" data-id="${c.id}">■ Emergency stop</button>` : ''}
+        ${c.paused ? h`<button class="btn primary" data-action="cluster-resume" data-id="${c.id}">Resume</button>` : ''}
+        ${c.status !== 'revoked' ? h`<button class="btn" data-action="cluster-regen" data-id="${c.id}">New enrollment token</button>
+          <button class="btn danger" data-action="cluster-remove" data-id="${c.id}" data-name="${c.name}">Remove</button>` : ''}
+      </div></div>
+    ${c.paused ? h`<div class="banner err"><div><b>Emergency stop is active.</b> Queued experiments were cancelled, running ones are being aborted by the agent, and no new experiments will start until you resume.</div></div>` : ''}
+    ${enroll ? enrollPanel(c, enroll) : (c.state === 'pending' ? h`<div class="banner info">No token is shown because it was only displayed once. Use <b>New enrollment token</b> to create another.${c.enroll_expires_at ? ' Current token expires ' + fmtTime(c.enroll_expires_at) + '.' : ''}</div>` : '')}
+    ${c.status === 'connected' ? h`
+    <div class="grid g2" style="align-items:start">
+      <div class="card"><div class="card-title"><h2>Register an application</h2></div>
+        <div class="muted small" style="margin-bottom:10px">Experiments can only target applications you register here, in namespaces the agent allows (${c.allowed_namespaces.join(', ')}).</div>
+        <div id="capp-error"></div>
+        <form data-form="cluster-app" data-id="${c.id}" novalidate>
+          <div class="field"><label>Application name</label><input type="text" name="name" maxlength="80" required></div>
+          <div class="field"><label>Namespace</label><select name="namespace">${c.allowed_namespaces.map(n => h`<option value="${n}">${n}</option>`)}</select></div>
+          <button class="btn primary" type="submit">Register application</button>
+        </form>
+        ${c.applications.length ? h`<h3 style="margin:16px 0 6px">Registered</h3>${c.applications.map(a => h`<div class="svc-row" style="padding:6px 0;border-bottom:1px solid #1d2a42"><a href="#/apps/${a.id}"><b>${a.name}</b></a><span class="mono small muted">ns ${a.namespace}</span></div>`)}` : ''}
+      </div>
+      <div class="card"><div class="card-title"><h2>Discovered workloads</h2><span class="muted small">${c.inventory_at ? 'as of ' + fmtTime(c.inventory_at) : ''}</span></div>
+        ${Object.keys(c.inventory || {}).length ? Object.entries(c.inventory).map(([ns, items]) => h`<h3 style="margin:8px 0 4px">${ns}</h3>
+          ${items.length ? h`<div class="table-wrap"><table><tbody>${items.map(d => h`<tr><td class="mono">${d.app_label || d.deployment}</td><td><span class="badge ${d.ready >= 1 ? 'b-completed' : 'b-failed'}">${d.ready}/${d.replicas}</span></td></tr>`)}</tbody></table></div>` : h`<div class="muted small">No deployments.</div>`}`)
+          : h`<div class="empty">Waiting for the agent's first report…</div>`}
+      </div></div>
+    <div class="card"><div class="card-title"><h2>Recent jobs</h2></div>
+      ${c.jobs.length ? h`<div class="table-wrap"><table><thead><tr><th>Job</th><th>Experiment</th><th>Status</th><th>Created</th></tr></thead><tbody>
+        ${c.jobs.map(j => h`<tr><td class="mono">#${j.id}</td><td><a href="#/experiments/${j.experiment_id}">${refOf(j.experiment_id)}</a></td><td>${statusBadge(j.status === 'done' ? 'completed' : j.status === 'queued' || j.status === 'leased' ? 'pending' : j.status === 'running' ? 'running' : 'failed')} <span class="muted small">${j.status}${j.error ? ' · ' + j.error : ''}</span></td><td class="muted small">${fmtDate(j.created_at)}</td></tr>`)}</tbody></table></div>`
+        : h`<div class="empty">No jobs yet.</div>`}</div>` : ''}
+    <div class="card"><div class="card-title"><h2>Audit log</h2></div>
+      ${c.audit.length ? h`<div class="table-wrap"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr></thead><tbody>
+        ${c.audit.map(a => h`<tr><td class="muted small">${fmtDate(a.ts)}</td><td class="mono small">${a.actor}</td><td class="mono small">${a.action}</td><td class="small">${a.detail || ''}${a.ip ? h` <span class="faint">(${a.ip})</span>` : ''}</td></tr>`)}</tbody></table></div>`
+        : h`<div class="empty">Nothing recorded yet.</div>`}</div>`));
+  if (c.status !== 'revoked') {
+    const t = setTimeout(() => { if (location.hash === `#/clusters/${id}` && !document.querySelector('input:focus')) route(); }, 5000);
+    S.cleanup = () => clearTimeout(t);
+  }
+}
+
+async function registerClusterApp(form) {
+  const box = document.getElementById('capp-error'); box.innerHTML = '';
+  try {
+    const r = await api('POST', `/api/clusters/${form.dataset.id}/applications`, {name: form.name.value, namespace: form.namespace.value});
+    toast('Application registered.', 'ok');
+    location.hash = `#/apps/${r.application_id}`;
+  } catch (e) { box.innerHTML = h`<div class="banner err">${e.message}</div>`.s; }
+}
+
+document.addEventListener('input', ev => {
+  if (ev.target.id === 'enroll-ns') {
+    const ns = ev.target.value.replace(/\s+/g, '') || 'default';
+    document.getElementById('enroll-cmd').textContent =
+      `python agent.py --server ${ev.target.dataset.server} --token ${ev.target.dataset.token} --allowed-namespaces ${ns}`;
+  }
+});
+
 /* ---------- global event delegation ---------- */
 document.addEventListener('click', async ev => {
   const row = ev.target.closest('tr[data-href]');
@@ -577,6 +697,22 @@ document.addEventListener('click', async ev => {
       toast('Application deleted.', 'ok');
       if (el.dataset.then === 'apps') location.hash = '#/apps'; else await pageApps();
     } catch (e) { toast(e.message, 'err'); }
+  } else if (action === 'copy-cmd') {
+    const pre = document.getElementById('enroll-cmd');
+    try { await navigator.clipboard.writeText(pre.textContent); toast('Command copied.', 'ok'); } catch (e) { toast('Select the command and copy it manually.', 'err'); }
+  } else if (action === 'cluster-stop') {
+    if (!confirm('EMERGENCY STOP: cancel queued experiments, abort running ones, and block new ones for this cluster?')) return;
+    try { const r = await api('POST', `/api/clusters/${el.dataset.id}/emergency-stop`, {}); toast(`Emergency stop active (${r.jobs_affected} job(s) affected).`, 'ok'); await pageClusterDetail(+el.dataset.id); }
+    catch (e) { toast(e.message, 'err'); }
+  } else if (action === 'cluster-resume') {
+    try { await api('POST', `/api/clusters/${el.dataset.id}/resume`, {}); toast('Resumed.', 'ok'); await pageClusterDetail(+el.dataset.id); } catch (e) { toast(e.message, 'err'); }
+  } else if (action === 'cluster-regen') {
+    if (!confirm('Create a new enrollment token? The current agent credential stops working and the agent must re-enroll.')) return;
+    try { const r = await api('POST', `/api/clusters/${el.dataset.id}/enrollment`, {}); S.enroll = {id: +el.dataset.id, ...r.enrollment}; await pageClusterDetail(+el.dataset.id); }
+    catch (e) { toast(e.message, 'err'); }
+  } else if (action === 'cluster-remove') {
+    if (!confirm(`Remove cluster “${el.dataset.name}”? The agent is disconnected. Past experiments and reports are kept.`)) return;
+    try { await api('DELETE', `/api/clusters/${el.dataset.id}`); toast('Cluster removed.', 'ok'); location.hash = '#/clusters'; } catch (e) { toast(e.message, 'err'); }
   } else if (action === 'deploy-app') {
     el.disabled = true;
     try { await api('POST', `/api/applications/${el.dataset.id}/deploy`, {}); toast('Deployment started.', 'ok'); await pageAppDetail(+el.dataset.id); }
@@ -607,6 +743,8 @@ document.addEventListener('submit', ev => {
   const kind = form.dataset.form;
   if (kind === 'login' || kind === 'register') submitAuth(form, kind);
   else if (kind === 'upload') uploadApp(form);
+  else if (kind === 'cluster-create') createCluster(form);
+  else if (kind === 'cluster-app') registerClusterApp(form);
   else if (kind === 'experiment') window.__runExperiment && window.__runExperiment();
 });
 

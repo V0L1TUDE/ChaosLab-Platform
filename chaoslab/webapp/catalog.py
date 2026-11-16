@@ -109,6 +109,21 @@ def get_builtin(slug: Optional[str]) -> Optional[Dict[str, Any]]:
     return _APP_BY_SLUG.get(slug) if slug else None
 
 
+def _resolve_cluster_app(row) -> Optional[Dict[str, Any]]:
+    """An application living in a customer cluster connected through the ChaosLab agent."""
+    from . import clusters
+    with db.session() as conn:
+        cluster = conn.execute("SELECT * FROM clusters WHERE id = ?", (row["cluster_id"],)).fetchone()
+    if not cluster or cluster["status"] == "revoked":
+        return None
+    return {"slug": None, "id": row["id"], "name": row["name"], "description": row["description"],
+            "namespace": row["namespace"], "static_services": [], "curated": False,
+            "cluster_id": cluster["id"], "cluster_name": cluster["name"], "cluster_online": clusters.is_online(cluster),
+            "cluster_paused": bool(cluster["paused"]), "cluster_seen": cluster["last_seen"],
+            "agent_inventory": clusters.inventory_services(cluster, row["namespace"]),
+            "inventory_at": cluster["inventory_at"]}
+
+
 def resolve_app(row) -> Optional[Dict[str, Any]]:
     """
     Catalog entry for an applications row: a built-in app, or a user's validated manifest upload (whose
@@ -117,6 +132,8 @@ def resolve_app(row) -> Optional[Dict[str, Any]]:
     """
     if row["slug"]:
         return get_builtin(row["slug"])
+    if row["cluster_id"]:
+        return _resolve_cluster_app(row)
     if not row["manifest_json"] or not row["validation_json"]:
         return None
     workloads = json.loads(row["validation_json"]).get("workloads", [])
@@ -124,7 +141,7 @@ def resolve_app(row) -> Optional[Dict[str, Any]]:
                  "unknown", "Uploaded workload: " + ", ".join(w.get("images") or [])) for w in workloads]
     return {"slug": None, "id": row["id"], "name": row["name"], "description": row["description"],
             "namespace": k8s_deploy.namespace_for(row["id"]), "static_services": services,
-            "uploaded": True, "deployed": row["status"] == "deployed", "status": row["status"]}
+            "uploaded": True, "deployed": row["status"] == "deployed", "status": row["status"], "curated": False}
 
 
 # ----------------------------------------------------------------------------- discovery
@@ -183,6 +200,20 @@ def discover_services(app: Dict[str, Any], force: bool = False) -> Dict[str, Any
     with the reason). Cluster services missing from the static table still appear (metadata unknown).
     """
     meta = {t[0]: t for t in app["static_services"]}
+    if app.get("cluster_id"):
+        services = []
+        for d in sorted(app["agent_inventory"], key=lambda x: x["deployment"]):
+            if not d["app_label"]:
+                continue          # the engine targets pods by the `app` label
+            name = d["app_label"]
+            services.append({"name": name, "language": "unknown", "protocol": "unknown",
+                             "description": f"Deployment {d['deployment']} in your cluster.",
+                             "targetable": not _NON_TARGETABLE.search(name), "replicas": d["replicas"], "ready": d["ready"]})
+        online = app["cluster_online"] and not app["cluster_paused"]
+        err = None if online else ("Emergency stop is active for this cluster." if app["cluster_paused"]
+                                   else "The ChaosLab agent is offline; showing the last reported services.")
+        return {"source": "agent" if online else "static", "discovered_at": app["inventory_at"] or db.utcnow(),
+                "error": err, "services": services}
     if app.get("uploaded") and not app.get("deployed"):
         return {"source": "static", "discovered_at": db.utcnow(), "error": "Application is not deployed to the cluster.",
                 "services": [_static_service(app, t) for t in app["static_services"]]}
@@ -287,7 +318,7 @@ def build_engine_config(app: Dict[str, Any], service: str, fault_id: str, durati
     namespace = app["namespace"]
     fault = _FAULT_BY_ID[fault_id]
     engine_fault = fault["engine_type"]
-    curated = _find_curated_yaml(namespace, service, engine_fault)
+    curated = _find_curated_yaml(namespace, service, engine_fault) if app.get("curated", True) else None
 
     cfg: Dict[str, Any] = {}
     if curated and not full_verification:

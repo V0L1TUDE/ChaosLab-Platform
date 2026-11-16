@@ -48,6 +48,10 @@ def on_startup() -> None:
     d = deployments.recover_interrupted()
     if d:
         print(f"Recovered {d} interrupted deployment(s) -> deploy_failed.")
+    from . import db as _db
+    with _db.session() as conn:     # jobs whose experiment worker died with the server can never be collected
+        conn.execute("UPDATE jobs SET status = 'cancelled', error = 'Server restarted.', finished_at = ? "
+                     "WHERE status IN ('queued', 'leased', 'running')", (_db.utcnow(),))
     n = recover_interrupted_experiments()
     if n:
         print(f"Recovered {n} interrupted experiment(s) -> failed.")

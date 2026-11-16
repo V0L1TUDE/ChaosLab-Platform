@@ -1,0 +1,71 @@
+# Least-privilege RBAC for the ChaosLab agent (in-cluster deployment).
+#   kubectl apply -f agent-rbac.yaml
+# Then REPEAT the Role + RoleBinding block for every namespace the agent may test
+# (the same list you pass as --allowed-namespaces). The agent has NO access to any other namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaoslab-agent
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaoslab-agent
+  namespace: chaoslab-agent
+---
+# Needed once, to read the cluster's identity (kube-system namespace UID). Read-only, one object.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaoslab-agent-identity
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: ["kube-system"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: chaoslab-agent-identity
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: chaoslab-agent-identity
+subjects:
+  - kind: ServiceAccount
+    name: chaoslab-agent
+    namespace: chaoslab-agent
+---
+# ---- one Role + RoleBinding per allowed namespace (replace TARGET_NAMESPACE) ----
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaoslab-agent
+  namespace: TARGET_NAMESPACE
+rules:
+  # read-only view of workloads (inventory, readiness, evidence)
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
+  # create / observe / remove the fault itself (Chaos Mesh custom resources in THIS namespace only)
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["podchaos", "networkchaos"]
+    verbs: ["create", "get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chaoslab-agent
+  namespace: TARGET_NAMESPACE
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: chaoslab-agent
+subjects:
+  - kind: ServiceAccount
+    name: chaoslab-agent
+    namespace: chaoslab-agent

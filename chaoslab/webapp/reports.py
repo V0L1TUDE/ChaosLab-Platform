@@ -31,6 +31,10 @@ def build_report(conn, row) -> Dict[str, Any]:
         "WHERE experiment_id = ? AND stage != 'metric' ORDER BY id", (row["id"],)
     ).fetchall()
     simulated = row["mode"] == "simulated"
+    cluster = None
+    if row["cluster_id"]:
+        c = conn.execute("SELECT id, name FROM clusters WHERE id = ?", (row["cluster_id"],)).fetchone()
+        cluster = {"id": c["id"], "name": c["name"]} if c else None
     oracle = (result or {}).get("oracle")
     if row["status"] == "failed" or not oracle:
         overall, final = "NOT_EVALUATED", "FAILED (execution error; the Oracle did not run)"
@@ -48,7 +52,8 @@ def build_report(conn, row) -> Dict[str, Any]:
         "application": {"id": row["application_id"], "name": app_name},
         "execution_mode": "Simulated" if simulated else "Live",
         "simulated": simulated,
-        "data_source": DATA_SOURCE_SIMULATED if simulated else DATA_SOURCE_LIVE,
+        "data_source": (result or {}).get("data_source") or (DATA_SOURCE_SIMULATED if simulated else DATA_SOURCE_LIVE),
+        "cluster": cluster,
         "simulation_notice": SIM_NOTICE if simulated else None,
         "target_service": row["target_service"],
         "fault": {"id": row["fault_type"], "label": fault.get("label", row["fault_type"]),
@@ -143,6 +148,7 @@ def render_html(r: Dict[str, Any]) -> str:
         ("Duration (s)", _e(cfg["duration_seconds"])),
         ("Namespace", _e(cfg["namespace"])),
         ("Execution mode", _e(r["execution_mode"]) + (' <span class="b SIM">SIMULATED</span>' if sim else "")),
+        ("Cluster", _e((r.get("cluster") or {}).get("name") or "ChaosLab demo cluster")),
         ("Status", _e(r["status"])),
         ("Started", _e(r["started_at"])),
         ("Completed", _e(r["completed_at"])),
@@ -213,12 +219,14 @@ def _upsert(conn, exp_id: int, user_id: int, fmt: str, path: str, overall: str) 
     )
 
 
-def generate(exp_id: int) -> Dict[str, str]:
+def generate(exp_id: int, overrides: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     """Build and persist the JSON + HTML reports (and register the engine-native HTML for Live runs)."""
     with db.session() as conn:
         row = conn.execute("SELECT * FROM experiments WHERE id = ?", (exp_id,)).fetchone()
         if not row:
             raise ValueError("experiment not found")
+        if overrides:                      # reflect the final outcome before it is committed to the experiments row
+            row = {**dict(row), **overrides}
         report = build_report(conn, row)
         out_dir = os.path.join(config.REPORT_DIR, f"user_{row['user_id']}")
         os.makedirs(out_dir, exist_ok=True)

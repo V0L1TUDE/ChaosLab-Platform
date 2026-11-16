@@ -13,7 +13,8 @@ from . import config, db
 from .http_core import create_server
 
 # Feature modules register their routes on import. Optional ones are added as they land.
-ROUTE_MODULES = ["routes_auth", "routes_apps", "routes_experiments", "routes_reports", "routes_dashboard"]
+ROUTE_MODULES = ["routes_auth", "routes_apps", "routes_experiments", "routes_reports", "routes_dashboard",
+                 "routes_clusters", "routes_agent"]
 
 
 def load_routes() -> None:
