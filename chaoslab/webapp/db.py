@@ -75,7 +75,8 @@ CREATE TABLE IF NOT EXISTS experiment_events (
     stage         TEXT    NOT NULL,
     level         TEXT    NOT NULL DEFAULT 'info',
     message       TEXT    NOT NULL,
-    simulated     INTEGER NOT NULL DEFAULT 0
+    simulated     INTEGER NOT NULL DEFAULT 0,
+    data          TEXT                       -- JSON payload for metric samples
 );
 CREATE INDEX IF NOT EXISTS idx_events_experiment ON experiment_events(experiment_id, id);
 
