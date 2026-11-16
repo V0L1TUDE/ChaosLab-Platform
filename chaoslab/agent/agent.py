@@ -546,6 +546,32 @@ class Agent:
         return 0
 
 
+def establish_credential(agent: "Agent", token: Optional[str]) -> Optional[str]:
+    """
+    Decide which credential to run with. A --token given on the command line always wins (enroll now and replace
+    any stored credential). If that token is rejected (already used/expired, e.g. an in-cluster restart with the
+    same Secret) and a credential is stored for this server, keep using the stored one.
+    Returns None when ready, else an error message.
+    """
+    agent.load_state()
+    if token:
+        try:
+            agent.enroll(token)
+            return None
+        except ApiError as e:
+            if agent.cred and e.status == 401:
+                log(f"The provided token was not accepted ({e}); continuing with the stored credential "
+                    f"for cluster {agent.cred['cluster_id']} ({agent.state_file}).")
+                return None
+            return f"Enrollment failed: {e}"
+        except RuntimeError as e:
+            return f"Enrollment failed: {e}"
+    if agent.cred:
+        log(f"Using stored credential for cluster {agent.cred['cluster_id']} (state: {agent.state_file}).")
+        return None
+    return "Not enrolled yet: provide --token (create one under Clusters in the ChaosLab web app)."
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description="ChaosLab agent")
     p.add_argument("--server", default=os.environ.get("CHAOSLAB_SERVER"), help="ChaosLab server URL (https://...)")
@@ -583,17 +609,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     state_file = os.path.join(args.state_dir, "agent.json")
     agent = Agent(api, policy, state_file,
                   executor=lambda job, cfg, rep: engine_executor(job, cfg, rep, args.verifier_dir))
-    agent.load_state()
-    if not agent.cred:
-        if not args.token:
-            p.error("not enrolled yet: provide --token (create one under Clusters in the ChaosLab web app)")
-        try:
-            agent.enroll(args.token)
-        except (ApiError, RuntimeError) as e:
-            log(f"Enrollment failed: {e}")
-            return 1
-    else:
-        log(f"Using stored credential for cluster {agent.cred['cluster_id']} (state: {state_file}).")
+    problem = establish_credential(agent, args.token)
+    if problem:
+        log(problem)
+        return 1
 
     def shutdown(*_):
         log("Shutting down...")
