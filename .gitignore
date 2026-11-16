@@ -28,3 +28,6 @@ pkg/
 release/wi-kubernetes-manifests.yaml
 vendor/
 gha-creds-*.json
+
+# ChaosLab online MVP runtime data (SQLite DB, uploads, reports)
+chaoslab/webapp/data/
