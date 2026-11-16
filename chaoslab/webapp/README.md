@@ -102,6 +102,7 @@ Agent API (Bearer auth, outbound from the agent): `POST /agent/v1/enroll`, `/age
 `/agent/v1/jobs/{id}/events`, `/agent/v1/jobs/{id}/result`. Credentials: enrollment token `cle_…` (one-time) → agent credential `cla_…`
 → per-job token `clj_…` (valid only for that job until its lease expires). Enrollment attempts are throttled per IP.
 Probes: `POST /api/applications/{id}/probes {service, probes|null}` stores validated declarative probes (HTTP GET health [required], functional GET, log substrings; same whitelist as the agent, with a parity test). They become the job's `application` block: the agent executes them (pre-flight before the fault, again after recovery) and the server's Oracle evaluates the app invariants from the evidence.
+Tracing: `POST /api/applications/{id}/telemetry {service, telemetry|null}` stores per-service tracing checks (traced service name, max p95, optional caller traffic during the fault, require error spans). The agent collects them from the Jaeger it was started with (`--jaeger`); collection failures make the telemetry invariants SKIP. With probes + tracing, all 11 invariants are evaluated.
 User API: `GET/POST /api/clusters`, `GET/DELETE /api/clusters/{id}`, `POST /api/clusters/{id}/{enrollment|emergency-stop|resume|applications}`.
 Extra tables: `clusters`, `jobs`, `audit_log`; `applications.cluster_id`, `experiments.cluster_id`.
 Env: `CHAOSLAB_PUBLIC_URL` (shown in install commands), `CHAOSLAB_AGENT_ONLINE_SECONDS` (45), `CHAOSLAB_AGENT_QUEUE_TIMEOUT_SECONDS` (120),
@@ -228,7 +229,7 @@ mode for the curated experiments that configure probes (e.g. `paymentservice` po
 `N/A` otherwise. Simulated runs evaluate all groups on predefined evidence (still `N/A` for `target_impact` on network faults).
 
 ## Remaining limitations
-* Customer clusters (agent): infrastructure + application invariants via declarative HTTP GET/log probes (no gRPC, no telemetry/Jaeger yet),
+* Customer clusters (agent): all 11 invariants via HTTP GET/log probes and read-only Jaeger queries (no gRPC probes; Jaeger only),
   one experiment per cluster, and evidence is only as trustworthy as the agent the customer runs. No agent auto-update,
   no mTLS/key pinning yet, and the control plane is a single process (SQLite + threads).
 * Uploaded apps must be Kubernetes manifests (Deployment/Service/ConfigMap with registry images): no Secrets, volumes beyond
