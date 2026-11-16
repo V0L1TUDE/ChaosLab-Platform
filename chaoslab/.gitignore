@@ -9,3 +9,4 @@ reports/runs/
 reports/registered_*_report.*
 # Latest exports for the dedicated local transaction demo
 reports/local_project_create_readback_report.*
+reports/local_project_persistence_tracing_report.*

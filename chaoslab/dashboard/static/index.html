@@ -654,7 +654,7 @@
             <div class="status-pill" id="gateStatusPill">
                 <span id="gatePillText">Quality Gate: Checking...</span>
             </div>
-            <a href="http://localhost:16686" target="_blank" class="btn-link">
+            <a id="jaegerLink" href="http://localhost:16686" target="_blank" class="btn-link">
                 🔍 Jaeger Traces
             </a>
             <button onclick="fetchInitialData()" class="btn-link" style="cursor: pointer;">
@@ -790,7 +790,7 @@
             <div class="card-header">
                 <div class="card-title">
                     <span>⚖ Verification Oracle Invariant Evaluation</span>
-                    <span class="badge" id="oracleRulesBadge">11 Rules</span>
+                    <span class="badge" id="oracleRulesBadge">12 Rules</span>
                 </div>
             </div>
 
@@ -799,7 +799,7 @@
                     <span>Awaiting Experiment Execution</span>
                 </div>
                 <div style="font-size: 13px; color: var(--text-muted);" id="scorecardSubtext">
-                    Trigger an experiment to evaluate all 11 declarative invariants.
+                    Trigger an experiment to evaluate all configured declarative invariants.
                 </div>
             </div>
 
@@ -926,8 +926,20 @@
                 fetchExperiments(),
                 fetchExecutionState(),
                 fetchQualityGate(),
-                fetchReports()
+                fetchReports(),
+                fetchRuntime()
             ]);
+        }
+
+        let traceQueryUrl = null;
+        async function fetchRuntime() {
+            try {
+                const response = await fetch('/api/runtime');
+                const runtime = await response.json();
+                traceQueryUrl = runtime.trace_query_url;
+                const link = document.getElementById('jaegerLink');
+                if (link && traceQueryUrl) link.href = traceQueryUrl;
+            } catch (error) { console.error('Runtime lookup failed', error); }
         }
 
         async function fetchNamespaces() {
@@ -1255,7 +1267,7 @@
 
             if (sampleId !== "N/A") {
                 document.getElementById('telTraceLink').innerHTML = `
-                    <a href="http://localhost:16686/trace/${sampleId}" target="_blank" class="btn-link" style="padding:4px 10px; font-size:12px;">
+                    <a href="${traceQueryUrl || 'http://localhost:16686'}/trace/${encodeURIComponent(sampleId)}" target="_blank" class="btn-link" style="padding:4px 10px; font-size:12px;">
                         Inspect in Jaeger &rarr;
                     </a>
                 `;

@@ -99,6 +99,16 @@ class PreflightTests(unittest.TestCase):
         self.assertFalse(result['ready'])
         self.command_mock.assert_not_called()
 
+    def test_trace_endpoint_must_match_launcher_managed_connection(self):
+        self.config['telemetry']={'enabled':True,'query_endpoint':'http://other.example:16686'}
+        self.write()
+        with patch.dict(os.environ,{'CHAOSLAB_JAEGER_QUERY_URL':'http://127.0.0.1:16686'}), \
+             patch.object(preflight,'TelemetryClient') as client:
+            client.return_value.is_connected.return_value=True
+            result,_=preflight.check_experiment('sample')
+        self.assertFalse(result['ready'])
+        self.assertTrue(any(row['name']=='Local trace backend' and not row['passed'] for row in result['checks']))
+
 
 class LaunchPolicyTests(unittest.TestCase):
     def setUp(self):

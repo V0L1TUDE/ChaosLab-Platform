@@ -1,209 +1,157 @@
-"""
-ChaosLab OpenTelemetry Query & Verification Engine
-==================================================
-Interacts with in-cluster OpenTelemetry receiver / Jaeger REST API to collect,
-analyze, and verify distributed tracing, latency distributions, and error spans.
-"""
-
+"""Jaeger query client. Connections are explicit; no hidden background forwards."""
 import json
-import os
-import subprocess
+import re
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import urllib.request
 import urllib.error
+import urllib.parse
 
-JAEGER_DEFAULT_URL = "http://localhost:16686"
-_PORT_FORWARD_PROC = None
+JAEGER_DEFAULT_URL = 'http://127.0.0.1:16686'
 
-def ensure_jaeger_connection(base_url: str = JAEGER_DEFAULT_URL, namespace: str = "default") -> bool:
-    """Ensure Jaeger REST API is accessible on host, starting port-forward if needed."""
-    global _PORT_FORWARD_PROC
 
-    # Test if already responding
-    try:
-        req = urllib.request.Request(f"{base_url}/api/services", headers={"User-Agent": "ChaosLab"})
-        with urllib.request.urlopen(req, timeout=2) as resp:
-            if resp.status == 200:
-                return True
-    except Exception:
-        pass
-
-    # Start background port-forward if not responding
-    try:
-        _PORT_FORWARD_PROC = subprocess.Popen(
-            ["kubectl", "port-forward", "svc/jaeger", "16686:16686", "-n", namespace],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        # Give it a moment to bind
-        for _ in range(5):
-            time.sleep(1)
-            try:
-                req = urllib.request.Request(f"{base_url}/api/services", headers={"User-Agent": "ChaosLab"})
-                with urllib.request.urlopen(req, timeout=2) as resp:
-                    if resp.status == 200:
-                        return True
-            except Exception:
-                continue
-    except Exception as e:
-        print(f"Warning: Failed to launch Jaeger port-forward: {e}")
-
+def ensure_jaeger_connection(base_url=JAEGER_DEFAULT_URL, namespace='default'):
+    for path,key in (('/api/v3/services','services'),('/api/services','data')):
+        try:
+            with urllib.request.urlopen(base_url.rstrip('/')+path, timeout=2) as response:
+                return response.status == 200 and isinstance(json.load(response).get(key), list)
+        except urllib.error.HTTPError as error:
+            if error.code == 404:continue
+            return False
+        except (OSError, ValueError, AttributeError):
+            return False
     return False
 
-def calculate_percentile(values: List[float], p: float) -> float:
-    """Calculate the p-th percentile of a list of numeric values using linear interpolation."""
+
+def _otlp_traces(text):
+    """Normalize the stable Jaeger v3 OTLP JSON stream for the evidence analyzer."""
+    traces={}
+    for line in text.splitlines():
+        if not line.strip():continue
+        envelope=json.loads(line)
+        if 'error' in envelope:raise ValueError('Tracing API returned a stream error')
+        result=envelope.get('result')
+        if not isinstance(result,dict) or not isinstance(result.get('resourceSpans',[]),list):
+            raise ValueError('Invalid v3 tracing response')
+        for resource in result.get('resourceSpans',[]):
+            attributes={a['key']:next(iter(a.get('value',{}).values()),None) for a in resource.get('resource',{}).get('attributes',[])}
+            service=attributes.get('service.name')
+            for scope in resource.get('scopeSpans',[]):
+                for span in scope.get('spans',[]):
+                    trace_id=span['traceId']
+                    record=traces.setdefault(trace_id,{'traceID':trace_id,'processes':{},'spans':[]})
+                    process=str(service or 'unknown')
+                    record['processes'][process]={'serviceName':service}
+                    start=int(span['startTimeUnixNano']);end=int(span['endTimeUnixNano'])
+                    if end < start:raise ValueError('Invalid span duration')
+                    tags=[{'key':a['key'],'value':next(iter(a.get('value',{}).values()),None)} for a in span.get('attributes',[])]
+                    if span.get('kind') in (2,'SPAN_KIND_SERVER'):tags.append({'key':'span.kind','value':'server'})
+                    if span.get('status',{}).get('code') in (2,'STATUS_CODE_ERROR'):tags.append({'key':'otel.status_code','value':'ERROR'})
+                    record['spans'].append({'processID':process,'operationName':span.get('name',''),
+                                            'startTime':start//1000,'duration':(end-start)/1000,
+                                            'spanID':span.get('spanId'),'parentSpanID':span.get('parentSpanId'),'tags':tags})
+    return list(traces.values())
+
+
+def calculate_percentile(values, p):
     if not values:
         return 0.0
-    sorted_vals = sorted(values)
-    k = (len(sorted_vals) - 1) * (p / 100.0)
-    f = int(k)
-    c = f + 1
-    if c < len(sorted_vals):
-        return sorted_vals[f] + (k - f) * (sorted_vals[c] - sorted_vals[f])
-    return sorted_vals[f]
+    ordered=sorted(values)
+    index=(len(ordered)-1)*(p/100)
+    lower=int(index)
+    if lower+1 < len(ordered):
+        return ordered[lower]+(index-lower)*(ordered[lower+1]-ordered[lower])
+    return ordered[lower]
+
 
 class TelemetryClient:
-    """Client for querying and analyzing distributed traces from Jaeger."""
+    def __init__(self, base_url=JAEGER_DEFAULT_URL, namespace='default'):
+        self.base_url=base_url.rstrip('/')
+        self.namespace=namespace
 
-    def __init__(self, base_url: str = JAEGER_DEFAULT_URL, namespace: str = "default"):
-        self.base_url = base_url.rstrip("/")
-        self.namespace = namespace
+    def is_connected(self):
+        return ensure_jaeger_connection(self.base_url,self.namespace)
 
-    def is_connected(self) -> bool:
-        """Verify connectivity to Jaeger."""
-        return ensure_jaeger_connection(self.base_url, self.namespace)
+    def query_traces(self,service_name,start_time_us=None,end_time_us=None,limit=50,trace_id=None):
+        if trace_id:
+            if not re.fullmatch(r'[0-9a-f]{32}',trace_id):raise ValueError('Invalid trace ID')
+            route='/api/v3/traces/'+trace_id
+            legacy='/api/traces/'+trace_id
+        else:
+            end=end_time_us if end_time_us is not None else int(time.time()*1_000_000)
+            start=start_time_us if start_time_us is not None else end-60_000_000
+            stamp=lambda value:datetime.fromtimestamp(value/1_000_000,timezone.utc).isoformat().replace('+00:00','Z')
+            params={'query.serviceName':service_name,'query.startTimeMin':stamp(start),
+                    'query.startTimeMax':stamp(end),'query.searchDepth':limit}
+            route='/api/v3/traces?'+urllib.parse.urlencode(params)
+            old={'service':service_name,'limit':limit,'start':start,'end':end}
+            legacy='/api/traces?'+urllib.parse.urlencode(old)
+        for path,is_v3 in ((route,True),(legacy,False)):
+            try:
+                with urllib.request.urlopen(self.base_url+path,timeout=5) as response:
+                    text=response.read().decode('utf-8')
+                if is_v3:return _otlp_traces(text)
+                data=json.loads(text)
+                if not isinstance(data,dict) or not isinstance(data.get('data'),list) or data.get('errors'):
+                    raise ValueError('Invalid legacy tracing response')
+                return data['data']
+            except urllib.error.HTTPError as error:
+                if error.code == 404:continue
+                raise RuntimeError('Tracing query failed') from error
+            except (OSError,ValueError) as error:
+                raise RuntimeError('Tracing backend unavailable or returned invalid data') from error
+        if trace_id:return []
+        raise RuntimeError('No supported Jaeger query API is available')
 
-    def query_traces(
-        self,
-        service_name: str,
-        start_time_us: Optional[int] = None,
-        end_time_us: Optional[int] = None,
-        limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """Query traces for a specific service within an optional time range."""
-        if not self.is_connected():
-            return []
-
-        url = f"{self.base_url}/api/traces?service={service_name}&limit={limit}"
-        if start_time_us is not None:
-            url += f"&start={start_time_us}"
-        if end_time_us is not None:
-            url += f"&end={end_time_us}"
-
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "ChaosLab"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data.get("data", []) or []
-        except Exception as e:
-            # Service name might have prefix or suffix, fallback search
-            return []
-
-    def analyze_traces(self, traces: List[Dict[str, Any]], target_service: str = None) -> Dict[str, Any]:
-        """Analyze raw traces to calculate span counts, error rates, and latency percentiles."""
-        if not traces:
-            return {
-                "available": True,
-                "traces_count": 0,
-                "spans_count": 0,
-                "error_spans_count": 0,
-                "error_rate_pct": 0.0,
-                "latency_ms": {
-                    "min": 0.0,
-                    "avg": 0.0,
-                    "p50": 0.0,
-                    "p95": 0.0,
-                    "max": 0.0
-                },
-                "sample_trace_ids": [],
-                "operations": []
-            }
-
-        durations_ms: List[float] = []
-        total_spans = 0
-        error_spans = 0
-        operations = set()
-        trace_ids = []
-
+    def analyze_traces(self,traces,target_service=None,required_services=None,start_time_us=None,end_time_us=None,trace_id=None):
+        durations=[];target_count=0;errors=0;ids=[];operations=set();observed=set();distributed=[]
         for trace in traces:
-            t_id = trace.get("traceID")
-            if t_id and t_id not in trace_ids and len(trace_ids) < 5:
-                trace_ids.append(t_id)
-
-            spans = trace.get("spans", [])
+            identifier=trace.get('traceID')
+            if trace_id and identifier != trace_id:continue
+            processes=trace.get('processes',{})
+            spans=[];services=set()
+            for span in trace.get('spans',[]):
+                start=span.get('startTime',0)
+                if start_time_us is not None and start < start_time_us:continue
+                if end_time_us is not None and start > end_time_us:continue
+                service=processes.get(span.get('processID'),{}).get('serviceName')
+                if service:services.add(service)
+                if target_service and service != target_service:continue
+                spans.append(span)
+            if not spans:continue
+            if identifier:ids.append(identifier)
+            observed.update(services)
+            if required_services and set(required_services).issubset(services):distributed.append(identifier)
+            target_count+=len(spans)
+            server_spans=[s for s in spans if any(t.get('key')=='span.kind' and str(t.get('value')).lower()=='server' for t in s.get('tags',[]))]
+            for span in server_spans or spans:
+                durations.append(float(span.get('duration',0))/1000)
             for span in spans:
-                total_spans += 1
-                op = span.get("operationName", "")
-                if op:
-                    operations.add(op)
+                operations.add(span.get('operationName',''))
+                tags={tag.get('key'):tag.get('value') for tag in span.get('tags',[])}
+                if (tags.get('error') is True or str(tags.get('error')).lower()=='true'
+                    or str(tags.get('otel.status_code')).upper()=='ERROR'
+                    or tags.get('rpc.grpc.status_code') not in (None,0,'0')
+                    or str(tags.get('http.response.status_code', tags.get('http.status_code',''))).startswith('5')):
+                    errors+=1
+        return {'available':True,'traces_count':len(ids),'spans_count':target_count,
+                'error_spans_count':errors,'error_rate_pct':round(errors/target_count*100,2) if target_count else 0.0,
+                'latency_ms':{'min':round(min(durations),2) if durations else 0.0,
+                              'avg':round(sum(durations)/len(durations),2) if durations else 0.0,
+                              'p50':round(calculate_percentile(durations,50),2),
+                              'p95':round(calculate_percentile(durations,95),2),
+                              'max':round(max(durations),2) if durations else 0.0},
+                'sample_trace_ids':ids[:5],'operations':sorted(operations),'services_observed':sorted(observed),
+                'distributed_trace_ids':distributed[:5],'distributed_traces_count':len(distributed)}
 
-                # Duration is stored in microseconds in Jaeger
-                duration_us = span.get("duration", 0)
-                duration_ms = duration_us / 1000.0
-                durations_ms.append(duration_ms)
-
-                # Detect errors
-                is_error = False
-                for tag in span.get("tags", []):
-                    k = tag.get("key", "")
-                    v = tag.get("value")
-                    if k == "error" and (v is True or str(v).lower() == "true"):
-                        is_error = True
-                        break
-                    if k == "otel.status_code" and str(v).upper() == "ERROR":
-                        is_error = True
-                        break
-                    if k == "rpc.grpc.status_code" and v not in [0, "0", None]:
-                        is_error = True
-                        break
-
-                if is_error:
-                    error_spans += 1
-
-        error_rate_pct = round((error_spans / total_spans * 100.0), 2) if total_spans > 0 else 0.0
-        avg_lat = sum(durations_ms) / len(durations_ms) if durations_ms else 0.0
-
-        return {
-            "available": True,
-            "traces_count": len(traces),
-            "spans_count": total_spans,
-            "error_spans_count": error_spans,
-            "error_rate_pct": error_rate_pct,
-            "latency_ms": {
-                "min": round(min(durations_ms), 2) if durations_ms else 0.0,
-                "avg": round(avg_lat, 2),
-                "p50": round(calculate_percentile(durations_ms, 50), 2),
-                "p95": round(calculate_percentile(durations_ms, 95), 2),
-                "max": round(max(durations_ms), 2) if durations_ms else 0.0
-            },
-            "sample_trace_ids": trace_ids,
-            "operations": sorted(list(operations))
-        }
-
-    def get_service_telemetry(
-        self,
-        service_name: str,
-        start_time_us: Optional[int] = None,
-        end_time_us: Optional[int] = None,
-        limit: int = 50
-    ) -> Dict[str, Any]:
-        """Fetch and analyze telemetry for a target service."""
+    def get_service_telemetry(self,service_name,start_time_us=None,end_time_us=None,limit=50,trace_id=None,required_services=None):
         try:
-            traces = self.query_traces(service_name, start_time_us, end_time_us, limit)
-            result = self.analyze_traces(traces, service_name)
-            result["service"] = service_name
-            return result
-        except Exception as e:
-            return {
-                "available": False,
-                "error": str(e),
-                "service": service_name,
-                "traces_count": 0,
-                "spans_count": 0,
-                "error_spans_count": 0,
-                "error_rate_pct": 0.0,
-                "latency_ms": {"min": 0, "avg": 0, "p50": 0, "p95": 0, "max": 0},
-                "sample_trace_ids": [],
-                "operations": []
-            }
+            traces=self.query_traces(service_name,start_time_us,end_time_us,limit,trace_id)
+            result=self.analyze_traces(traces,service_name,required_services,start_time_us,end_time_us,trace_id)
+        except (RuntimeError,ValueError,TypeError,AttributeError,KeyError) as error:
+            result=self.analyze_traces([],service_name)
+            result.update({'available':False,'error':str(error)})
+        result['service']=service_name
+        if trace_id:result['requested_trace_id']=trace_id
+        return result

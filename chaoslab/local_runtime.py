@@ -51,3 +51,53 @@ def inspect_local_context(require_pinned=False):
     config = json.loads(kubectl('config', 'view', '--minify', '-o', 'json'))
     endpoint = validate_local_config(config, expected or LOCAL_CONTEXT)
     return {'context': LOCAL_CONTEXT, 'server': endpoint}
+
+
+from contextlib import contextmanager
+import socket
+import time
+import urllib.request
+
+
+@contextmanager
+def managed_trace_connection(port=16686):
+    """Own exactly one loopback forward; never reuse or leave a foreign process."""
+    with socket.socket() as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError as error:
+            raise RuntimeError("Trace query port is occupied; choose another --trace-port") from error
+    process = subprocess.Popen([kubectl_binary(), "port-forward", "--address", "127.0.0.1",
+                                "-n", "chaoslab-observability", "svc/chaoslab-jaeger", f"{port}:16686"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    previous = os.environ.get("CHAOSLAB_JAEGER_QUERY_URL")
+    url = f"http://127.0.0.1:{port}"
+    try:
+        ready = False
+        for _ in range(30):
+            if process.poll() is not None:
+                break
+            try:
+                with urllib.request.urlopen(url + "/api/v3/services", timeout=1) as response:
+                    ready = response.status == 200 and isinstance(json.load(response).get("services"), list)
+            except (OSError, ValueError, AttributeError):
+                pass
+            if ready:
+                break
+            time.sleep(0.2)
+        if not ready:
+            raise RuntimeError("Local Jaeger forward did not become ready")
+        os.environ["CHAOSLAB_JAEGER_QUERY_URL"] = url
+        yield url
+    finally:
+        if previous is None:
+            os.environ.pop("CHAOSLAB_JAEGER_QUERY_URL", None)
+        else:
+            os.environ["CHAOSLAB_JAEGER_QUERY_URL"] = previous
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)

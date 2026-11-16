@@ -164,8 +164,10 @@ its name, owner ID and resolved owner name. The `readback` option fails the
 functional rule if the returned entity ID or expected fields differ.
 
 Run it only on the verified disposable local cluster using a kubeconfig pinned
-to that cluster. The project store is in memory: this tests new transactions
-after recovery, not survival of existing records. Repeated tests create disposable
+to that cluster. The local deployment uses SQLite when `PROJECT_DB_PATH` is set and retains
+its volume across pod replacement. Other deployments retain the previous
+in-memory mode. The older create/read-back experiment checks new transactions;
+use `local-project-persistence-tracing` to verify a record created before the fault. Repeated tests create disposable
 records; removing a pod loses its records. Telemetry is not configured.
 
 ### Dashboard discovery for the local transaction demo
@@ -199,3 +201,31 @@ If creation returns an ambiguous transport error, or the process/machine stops
 abruptly, inspect the named resource in the pinned local context. Do not blindly
 repeat injection while its state is uncertain. Deleting a Pod Kill resource does
 not undo pod termination; Kubernetes workload recovery is checked separately.
+
+
+### Persistent records and correlated tracing
+
+The local setup now includes a single-replica SQLite project service and a separate
+Jaeger v2 backend. `python chaoslab/local.py setup-demo` provisions both and
+registers `local-project-persistence-tracing`. The matching source configuration is
+`demo/project_persistence_experiment.yaml`. It verifies pre-fault data survival,
+a new post-recovery transaction, and that transaction's exact cross-service trace.
+The new persistence rule is N/A for older experiments unless explicitly configured.
+
+`application.persistence_check` specifies a POST `create` probe, a `read_path`
+containing `{id}`, and `verify_fields`. The baseline record is created and read
+before injection and compared after recovery. `storage_claim` names the PVC checked
+by local dashboard preflight. `telemetry.required_services` and
+`require_transaction_trace: true` require the same generated trace to contain the
+configured services. The launcher-managed query URL is used by default; dashboard
+preflight rejects a conflicting explicitly configured query endpoint.
+
+Keep `chaoslab-project-data` to retain records; setup never deletes this PVC.
+Trace storage is transient in this demo. See [Local development](../LOCAL_DEVELOPMENT.md)
+for backup handling, startup, port forwarding, and verification boundaries.
+
+The reviewed demo sets `telemetry.emit_client_span: true` and requires
+`chaoslab-verifier` alongside the two application services. This opt-in uses the
+in-pod OpenTelemetry SDK and `COLLECTOR_ADDR` to export the client parent span;
+other custom images must provide that SDK before using the option. Receipt is
+verified from Jaeger, rather than inferred from the exporter subprocess exit.

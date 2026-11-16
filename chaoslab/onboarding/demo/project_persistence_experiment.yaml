@@ -1,0 +1,78 @@
+name: local-project-persistence-tracing
+application_group: Local Persistent Project
+target:
+  namespace: chaoslab-demo
+  label:
+    app: chaoslab-project
+fault:
+  type: pod-kill
+  mode: one
+recovery:
+  timeout_seconds: 120
+  expected_ready_replicas: 1
+application:
+  enabled: true
+  health_probe:
+    type: http
+    path: /health
+    port: 8002
+    expected_status: 200
+  functional_check:
+    enabled: true
+    type: http
+    method: POST
+    path: /projects
+    port: 8002
+    expected_status: 201
+    expected_json_key: id
+    timeout: 5
+    headers:
+      Content-Type: application/json
+    body:
+      name: ChaosLab recovery verification
+      description: Disposable post-recovery test project
+      owner_id: usr-1
+    readback:
+      path: /projects/{id}
+      expected_json:
+        name: ChaosLab recovery verification
+        owner_id: usr-1
+        owner_name: Alice Chen
+  persistence_check:
+    enabled: true
+    storage_claim: chaoslab-project-data
+    create:
+      type: http
+      method: POST
+      path: /projects
+      port: 8002
+      expected_status: 201
+      expected_json_key: id
+      timeout: 5
+      headers:
+        Content-Type: application/json
+      body:
+        name: ChaosLab durable baseline
+        description: Created before pod replacement
+        owner_id: usr-1
+    read_path: /projects/{id}
+    verify_fields:
+    - id
+    - name
+    - description
+    - owner_id
+    - owner_name
+    - category
+    - status
+    - progress
+telemetry:
+  enabled: true
+  service_name: project-service
+  namespace: chaoslab-observability
+  required_services:
+  - chaoslab-verifier
+  - project-service
+  - user-service
+  require_transaction_trace: true
+  max_allowed_p95_ms: 1000
+  emit_client_span: true

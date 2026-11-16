@@ -103,10 +103,11 @@ class StartupCommandTests(unittest.TestCase):
         register=Mock()
         helper={'prepare_manifests':Mock(return_value=[]),'register_experiment':register}
         with patch('runpy.run_path',return_value=helper),patch.object(launcher,'kubectl') as command, \
+             patch.object(launcher,'backup_memory_projects',return_value=None),patch.object(launcher,'restore_projects'), \
              patch.object(registry,'ApplicationRegistry') as registry_class:
             registry_class.return_value.list_apps.return_value=[existing]
             launcher.setup_demo()
             registry_class.return_value.register.assert_not_called()
             registry_class.return_value.generate_experiment.assert_not_called()
-            register.assert_called_once()
+            self.assertEqual(register.call_count,2)
             self.assertTrue(all(call.args[0] in ('apply','annotate','-n') for call in command.call_args_list))

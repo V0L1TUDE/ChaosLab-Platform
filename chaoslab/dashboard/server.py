@@ -410,6 +410,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"experiments": exps}).encode("utf-8"))
             return
 
+        if path == "/api/runtime":
+            return self._write_json(200, {"trace_query_url": os.environ.get("CHAOSLAB_JAEGER_QUERY_URL"),
+                                          "execution_enabled": os.environ.get("CHAOSLAB_ENABLE_FAULT_RUNS") == "1"})
+
         if path == "/api/preflight":
             name = urllib.parse.parse_qs(parsed.query).get("name", [""])[0]
             summary, _ = check_experiment(name)

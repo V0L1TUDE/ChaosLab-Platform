@@ -29,11 +29,16 @@ python chaoslab/local.py start
 ```
 
 `doctor` checks the local node, controller namespace filtering, daemon readiness,
-and the demo namespace opt-in. It exits with a nonzero code for blockers.
+the demo namespace opt-in, a Bound project-data PVC, and local Jaeger readiness. It exits with a nonzero code for blockers.
 `setup-demo` is an explicit deployment operation: it applies only the reviewed
-sample, project, and user services to `chaoslab-demo`, opts that namespace into
+sample, project, and user services to `chaoslab-demo`, installs the cluster-internal
+Jaeger v2 backend in `chaoslab-observability`, opts the demo namespace into
 Chaos Mesh, registers the transaction experiment, and waits for readiness.
 Existing registrations and edited local experiment configurations are preserved.
+A ready legacy in-memory project deployment is backed up before updating and its
+records are imported with their original IDs. Backups remain under ignored
+`chaoslab/onboarding/data/backups/` with private file permissions. If a legacy
+service exists but is not ready, setup stops rather than silently replacing it.
 The project/user dependency downloads require Internet access on first startup
 and replacement. No service is published outside the cluster.
 
@@ -78,6 +83,46 @@ fault is refused rather than replaced. Process/machine failure or an ambiguous
 create timeout still requires operator inspection. There is no Cancel button.
 
 Local application records, drafts, and per-run reports are ignored by Git. Latest
-exports for built-in experiment suites retain their previous behavior. The demo
-project store is in memory: new transactions after recovery are verified, but
-existing-record durability and tracing are still separate work.
+exports for built-in experiment suites retain their previous behavior. The local project demo now uses SQLite on a 1 GiB persistent volume. Its single
+replica uses the Recreate rollout strategy; the PVC is retained by setup and
+across pod replacement. This is not a multi-replica production database or a
+backup/disaster-recovery system. Other deployments keep in-memory mode unless
+`PROJECT_DB_PATH` is explicitly set.
+
+
+## Persistent-data and distributed-trace verification
+
+`setup-demo` registers **local-project-persistence-tracing**. Select it in the
+dashboard, pass readiness review, and launch only in explicit execution mode.
+It creates and reads a baseline project **before** injection, replaces the project
+pod, verifies the same ID and configured contents afterward, and verifies a new
+create/read-back transaction. The persistent-data rule fails if readiness returns
+but the old record is absent or changed. Failed baseline seeding prevents injection.
+
+The same post-recovery functional workflow carries a generated sampled W3C trace
+ID. The oracle requires that exact trace to contain spans from `project-service`
+and `user-service`; unrelated health checks and old traces cannot satisfy it.
+The reviewed demo also exports the real verification client span as
+`chaoslab-verifier`, using the OpenTelemetry SDK already installed inside the
+application image. All three services are required in the correlated trace, so
+the client parent is present and Jaeger can render a complete tree.
+Target-service server spans determine latency. Missing telemetry, unavailable
+Jaeger, malformed data, or no target spans cannot pass a zero-latency SLA.
+Export retries are bounded. Fault-window errors are optional and are not claimed
+when that rule is not configured.
+
+Jaeger 2.23.0 uses the stable v3 OTLP JSON query API. Its image is from the official
+`jaegertracing/jaeger` repository. The demo backend uses transient trace storage;
+traces are lost if Jaeger restarts. It is separate from the project's persistent
+record store. See [Jaeger APIs](https://www.jaegertracing.io/docs/2.23/architecture/apis/).
+The launcher owns a loopback-only Jaeger forward, closes it on exit, and never
+reuses or terminates another process's forward. Use `--trace-port 16687` if 16686
+is occupied. The dashboard's Jaeger and trace links use the managed port.
+Standalone CLI users must provide their own query connection explicitly; the
+telemetry client no longer silently launches background processes.
+
+HTML, Markdown and JSON reports contain the persisted record's before/after
+evidence, correlated service names and trace ID, and check outcomes. These data
+and per-run archives remain local and excluded from Git. Preserving a volume does
+not test disk loss, node loss, database corruption, or backup restoration. Observed
+latency is from the verification transactions, not a sustained load test.

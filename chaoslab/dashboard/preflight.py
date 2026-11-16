@@ -5,6 +5,7 @@ import os
 import yaml
 
 from runner import discover_experiments
+from telemetry import TelemetryClient
 from engine import load_experiment_config, generate_chaos_manifest, get_label_selector
 from local_runtime import inspect_local_context, kubectl
 from onboarding.registry import allowed_namespaces
@@ -62,6 +63,16 @@ def check_experiment(name):
         ('Chaos Mesh daemon', lambda: _daemon_ready(read('get', 'daemonset', 'chaos-daemon', '-n', 'chaos-mesh', '-o', 'json')),
          'Chaos Mesh daemon must be ready on every scheduled node.'),
     ]
+    persistence = config.get("application", {}).get("persistence_check") or {}
+    if persistence.get("enabled", bool(persistence)):
+        claim = persistence.get("storage_claim")
+        tasks.append(('Persistent storage', lambda: bool(claim) and read('get', 'pvc', claim, '-n', ns, '-o', 'json').get('status', {}).get('phase') == 'Bound',
+                      'The configured data volume must be Bound.'))
+    telemetry = config.get("telemetry") or {}
+    if telemetry.get("enabled"):
+        url = os.environ.get("CHAOSLAB_JAEGER_QUERY_URL")
+        tasks.append(('Local trace backend', lambda: bool(url) and (not telemetry.get('query_endpoint') or isinstance(telemetry['query_endpoint'], str) and telemetry['query_endpoint'].rstrip('/') == url.rstrip('/')) and TelemetryClient(url).is_connected(),
+                      'A launcher-managed Jaeger connection must be available.'))
     for label, action, detail in tasks:
         try:
             check(label, action(), detail)

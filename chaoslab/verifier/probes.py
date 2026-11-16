@@ -10,6 +10,8 @@ import os
 import re
 import subprocess
 import time
+import uuid
+import copy
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.request
 import urllib.parse
@@ -296,7 +298,7 @@ class HttpProber:
                         readback_details = HttpProber.execute_functional_test(pod_name, namespace, {
                             "type": "http", "method": "GET", "path": readback_path, "port": port,
                             "timeout": timeout, "expected_status": readback.get("expected_status", 200),
-                            "expected_json_key": expected_key or "id"})
+                            "expected_json_key": expected_key or "id", "headers": headers})
                         actual = readback_details.get("parsed_json")
                         passed = (readback_details.get("passed", False)
                                   and readback_details.get("transaction_id") == found_id
@@ -326,6 +328,67 @@ class HttpProber:
             "passed": False,
             "error": res.stderr.strip() or res.stdout.strip() or "Functional request execution failed"
         }
+
+def export_verification_client_span(pod_name, namespace, trace_id, span_id, start_ns, end_ns, passed):
+    """Export the real in-pod verification client's parent span for a complete tree.
+
+    This opt-in requires the application image's existing OpenTelemetry SDK.
+    The backend trace check, not this subprocess exit, confirms actual receipt.
+    """
+    script = (
+        "import os\n"
+        "from opentelemetry.sdk.trace import TracerProvider\n"
+        "from opentelemetry.sdk.trace.id_generator import IdGenerator\n"
+        "from opentelemetry.sdk.resources import Resource\n"
+        "from opentelemetry.sdk.trace.export import SimpleSpanProcessor\n"
+        "from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter\n"
+        "from opentelemetry.trace import SpanKind, Status, StatusCode\n"
+        "class FixedIds(IdGenerator):\n"
+        f"    def generate_trace_id(self): return {int(trace_id,16)}\n"
+        f"    def generate_span_id(self): return {int(span_id,16)}\n"
+        "provider=TracerProvider(id_generator=FixedIds(),resource=Resource.create({'service.name':'chaoslab-verifier'}))\n"
+        "exporter=OTLPSpanExporter(endpoint=os.environ['COLLECTOR_ADDR'],insecure=True,timeout=3)\n"
+        "provider.add_span_processor(SimpleSpanProcessor(exporter))\n"
+        f"span=provider.get_tracer('chaoslab.verification').start_span('Create and read-back verification',kind=SpanKind.CLIENT,start_time={start_ns})\n"
+        f"span.set_status(Status(StatusCode.{'OK' if passed else 'ERROR'}))\n"
+        f"span.end(end_time={end_ns})\n"
+        "provider.shutdown()\n"
+    )
+    result=run_command(['kubectl','exec',pod_name,'-n',namespace,'--','python','-c',script],timeout=10)
+    return {'attempted':True,'command_succeeded':result.returncode==0,
+            'error':result.stderr.strip()[:300] if result.returncode else None}
+
+
+class PersistenceProber:
+    """Create/read before the fault, then read the same record after recovery."""
+
+    @staticmethod
+    def prepare(pod_name, namespace, spec):
+        created = HttpProber.execute_functional_test(pod_name, namespace, spec["create"])
+        record = created.get("parsed_json")
+        key = spec["create"].get("expected_json_key", "id")
+        fields = spec.get("verify_fields", [key])
+        if not created.get("passed") or not isinstance(record, dict) or key not in record or record[key] is None or str(record[key]) == "" or any(field not in record for field in fields):
+            return {"passed": False, "error": "Unable to create a complete baseline persistence record", "creation": created}
+        seed = {"record_id": str(record[key]), "expected": {field: record[field] for field in fields}}
+        baseline = PersistenceProber.verify(pod_name, namespace, spec, seed)
+        return {**seed, "passed": baseline["passed"], "creation": created, "baseline_readback": baseline}
+
+    @staticmethod
+    def verify(pod_name, namespace, spec, seed):
+        key = spec["create"].get("expected_json_key", "id")
+        path = spec["read_path"].replace("{id}", urllib.parse.quote(seed["record_id"], safe=""))
+        result = HttpProber.execute_functional_test(pod_name, namespace, {
+            "type": "http", "method": "GET", "path": path, "port": spec["create"].get("port", 8000),
+            "expected_status": 200, "expected_json_key": key, "timeout": spec["create"].get("timeout", 5)})
+        actual = result.get("parsed_json")
+        passed = (result.get("passed", False) and isinstance(actual, dict)
+                  and str(actual.get(key)) == seed["record_id"]
+                  and all(field in actual and actual[field] == value for field,value in seed["expected"].items()))
+        return {"enabled": True, "passed": bool(passed), "record_id": seed["record_id"],
+                "before": seed["expected"], "after": actual,
+                "error": None if passed else "Persisted record missing or changed after recovery"}
+
 
 class GrpcProber:
     """Generic gRPC Health and Functional Prober."""
@@ -557,7 +620,18 @@ class ProbeDispatcher:
         if func_spec and func_spec.get("enabled", True):
             func_type = func_spec.get("type", "http").lower()
             if func_type == "http":
+                func_spec = copy.deepcopy(func_spec)
+                telemetry_config = config.get("telemetry") or config.get("verification", {}).get("telemetry", {})
+                if telemetry_config.get("enabled"):
+                    trace_id = uuid.uuid4().hex
+                    client_span_id = uuid.uuid4().hex[:16]
+                    client_start_ns = time.time_ns()
+                    func_spec.setdefault("headers", {})["traceparent"] = f"00-{trace_id}-{client_span_id}-01"
+                    evidence["trace_id"] = trace_id
                 f_res = HttpProber.execute_functional_test(pod_name, namespace, func_spec)
+                if telemetry_config.get("enabled") and telemetry_config.get("emit_client_span"):
+                    evidence["client_span"] = export_verification_client_span(
+                        pod_name, namespace, trace_id, client_span_id, client_start_ns, time.time_ns(), f_res.get("passed",False))
                 evidence["functional_test_passed"] = f_res.get("passed", False)
                 evidence["transaction_id"] = f_res.get("transaction_id")
                 evidence["functional_details"] = f_res

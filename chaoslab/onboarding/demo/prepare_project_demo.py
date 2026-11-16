@@ -16,19 +16,20 @@ def prepare_manifests():
             "kind": "ConfigMap",
             "metadata": {"name": f"chaoslab-{service}-source", "namespace": "chaoslab-demo"},
             "data": {name: (source / name).read_text(encoding="utf-8")
-                     for name in ("main.py", "telemetry_helper.py", "requirements.txt")},
+                     for name in (("main.py", "telemetry_helper.py", "requirements.txt", "storage.py")
+                                  if service == "project" else ("main.py", "telemetry_helper.py", "requirements.txt"))},
         })
     manifests.extend(yaml.safe_load_all((demo / "project-demo-workloads.yaml").read_text(encoding="utf-8")))
     return manifests
 
 
-def register_experiment(destination=None):
+def register_experiment(destination=None, persistence=False):
     """Opt-in installation; never overwrite an edited local experiment."""
     demo = Path(__file__).resolve().parent
     target_dir = Path(destination) if destination is not None else demo.parent / "data" / "experiments"
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / "local-project-create-readback.yaml"
-    content = (demo / "project_transaction_experiment.yaml").read_bytes()
+    target = target_dir / ("local-project-persistence-tracing.yaml" if persistence else "local-project-create-readback.yaml")
+    content = (demo / ("project_persistence_experiment.yaml" if persistence else "project_transaction_experiment.yaml")).read_bytes()
     if target.exists():
         if target.read_bytes() != content:
             raise ValueError("Local transaction experiment has edits; refusing to overwrite it")
@@ -41,8 +42,12 @@ def register_experiment(destination=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--register-experiment", action="store_true", help="Also install the reviewed transaction config into local experiment discovery")
+    parser.add_argument("--register-persistence-experiment", action="store_true", help="Register the persistent-data and tracing experiment")
     args = parser.parse_args()
     if args.register_experiment:
         path = register_experiment()
         print(f"Registered local experiment: {path}", file=sys.stderr)
+    if args.register_persistence_experiment:
+        path = register_experiment(persistence=True)
+        print(f"Registered persistence experiment: {path}", file=sys.stderr)
     sys.stdout.write(yaml.safe_dump_all(prepare_manifests(), sort_keys=False))

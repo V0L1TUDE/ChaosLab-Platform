@@ -22,7 +22,7 @@ if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
 from oracle import VerificationOracle
-from probes import ProbeDispatcher
+from probes import ProbeDispatcher, PersistenceProber
 from reporter import ExperimentReporter
 from telemetry import TelemetryClient
 
@@ -110,6 +110,19 @@ def validate_experiment_config(config: Dict[str, Any]) -> None:
     replicas = recovery.get("expected_ready_replicas", verification.get("expected_ready_replicas", 1))
     if type(replicas) is not int or not 1 <= replicas <= 100:
         raise ValueError("Expected ready replicas must be an integer between 1 and 100")
+
+    application = config.get("application") or verification.get("application", {})
+    persistence = application.get("persistence_check") if isinstance(application, dict) else None
+    if persistence is not None and not isinstance(persistence, dict):
+        raise ValueError("Persistence check must be an object")
+    if persistence and persistence.get("enabled", True):
+        create = persistence.get("create")
+        if (not application.get("enabled", True) or fault_type != "pod-kill"
+                or not isinstance(create, dict) or create.get("method") != "POST"
+                or not isinstance(persistence.get("read_path"), str) or "{id}" not in persistence["read_path"]
+                or not isinstance(persistence.get("verify_fields"), list) or not persistence["verify_fields"]
+                or any(not isinstance(field, str) or not field for field in persistence["verify_fields"])):
+            raise ValueError("Persistence verification requires an enabled application, Pod Kill, POST create, read_path containing {id}, and verify_fields")
 
 
 def load_experiment_config(config_path: str) -> Dict[str, Any]:
@@ -423,6 +436,16 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
     for pod in initial_pods:
         print(f"- {pod['name']} ({pod['ready']}, {pod['status']})")
 
+    application_config = config.get("application") or config.get("verification", {}).get("application", {})
+    persistence_spec = application_config.get("persistence_check") or {}
+    persistence_seed = None
+    if persistence_spec.get("enabled", bool(persistence_spec)):
+        emit_progress("baseline", 15, "Creating and reading a baseline record before injection...")
+        persistence_seed = PersistenceProber.prepare(baseline_pod["name"], namespace, persistence_spec)
+        if not persistence_seed.get("passed"):
+            emit_progress("failed", 100, "Baseline persistence record could not be verified; no fault was injected.")
+            return False
+
     # Inject Fault
     emit_progress("injecting", 25, f"Injecting chaos fault '{fault_type}' via Chaos Mesh into namespace '{namespace}'...")
     chaos_success = False
@@ -529,7 +552,15 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
                 print(f"- Health Status: {app_evidence.get('health_status', 'N/A')}")
                 if app_evidence.get("transaction_id"):
                     print(f"- Functional Confirmation ID: {app_evidence.get('transaction_id')}")
-                print(f"- Container Startup Logs: {'Verified' if app_evidence.get('startup_log_detected') else 'Missing'}")
+                if "startup_log_detected" in app_evidence:
+                    print(f"- Container Startup Logs: {'Verified' if app_evidence.get('startup_log_detected') else 'Missing'}")
+
+        if persistence_seed:
+            if replacement_ready and target_probe_pod:
+                app_evidence["persistence"] = PersistenceProber.verify(target_probe_pod["name"], namespace, persistence_spec, persistence_seed)
+            else:
+                app_evidence["persistence"] = {"enabled": True, "passed": False,
+                                               "record_id": persistence_seed["record_id"], "error": "No recovered pod to verify persisted record"}
 
         # Collect Distributed Tracing Telemetry
         telemetry_config = config.get("telemetry") or config.get("verification", {}).get("telemetry", {})
@@ -539,38 +570,31 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
             print("Collecting distributed tracing telemetry from Jaeger...")
             emit_progress("telemetry", 85, "Collecting OpenTelemetry traces & analyzing latency distribution...")
             telemetry_service = telemetry_config.get("service_name") or target_name
-            jaeger_url = telemetry_config.get("query_endpoint", "http://localhost:16686")
-            time.sleep(3)
-
-            end_time_us = int(time.time() * 1_000_000)
-            client = TelemetryClient(base_url=jaeger_url, namespace="default")
-
-            post_rec_start = replacement_ready_us if replacement_ready_us else (end_time_us - 10_000_000)
-            post_recovery_tel = client.get_service_telemetry(
-                telemetry_service,
-                start_time_us=post_rec_start,
-                end_time_us=end_time_us + 2_000_000,
-                limit=50
-            )
-
-            if post_recovery_tel.get("traces_count", 0) == 0:
+            jaeger_url = telemetry_config.get("query_endpoint") or os.environ.get("CHAOSLAB_JAEGER_QUERY_URL", "http://127.0.0.1:16686")
+            client = TelemetryClient(base_url=jaeger_url, namespace=telemetry_config.get("namespace", "default"))
+            post_rec_start = replacement_ready_us if replacement_ready_us else fault_injected_us
+            trace_id = app_evidence.get("trace_id")
+            # Export is asynchronous. Wait only within this run's recovery window;
+            # never fall back to old traces from before the recovered transaction.
+            export_deadline = time.monotonic() + 10
+            while True:
                 post_recovery_tel = client.get_service_telemetry(
-                    telemetry_service,
-                    start_time_us=end_time_us - 15_000_000,
-                    end_time_us=end_time_us + 2_000_000,
-                    limit=50
-                )
-
+                    telemetry_service, start_time_us=post_rec_start,
+                    end_time_us=int(time.time() * 1_000_000), limit=50,
+                    trace_id=trace_id, required_services=telemetry_config.get("required_services"))
+                if (post_recovery_tel.get("traces_count", 0) > 0
+                        and (not telemetry_config.get("required_services") or post_recovery_tel.get("distributed_traces_count", 0) > 0)):
+                    break
+                if time.monotonic() >= export_deadline:
+                    break
+                time.sleep(0.5)
             fault_tel = client.get_service_telemetry(
-                telemetry_service,
-                start_time_us=fault_injected_us,
-                end_time_us=post_rec_start,
-                limit=50
-            )
-
-            telemetry_evidence = post_recovery_tel
-            telemetry_evidence["fault_window_errors"] = fault_tel.get("error_spans_count", 0)
-            telemetry_evidence["error_spans_count"] = fault_tel.get("error_spans_count", 0) + post_recovery_tel.get("error_spans_count", 0)
+                telemetry_service, start_time_us=fault_injected_us, end_time_us=post_rec_start, limit=50)
+            telemetry_evidence = {**post_recovery_tel, "enabled": True,
+                                  "fault_window_errors": fault_tel.get("error_spans_count", 0),
+                                  "trace_query_url": jaeger_url}
+            if telemetry_config.get("require_transaction_trace") and not trace_id:
+                telemetry_evidence.update({"available": False, "error": "No transaction trace ID was generated"})
 
             if telemetry_evidence.get("available") and telemetry_evidence.get("traces_count", 0) > 0:
                 lat = telemetry_evidence.get("latency_ms", {})

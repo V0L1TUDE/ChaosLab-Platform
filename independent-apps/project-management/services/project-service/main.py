@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
+from storage import ProjectStore
 from telemetry_helper import init_tracer, inject_trace_headers
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
@@ -89,6 +90,12 @@ PROJECTS_DB: Dict[str, Project] = {
     )
 }
 
+# Preserve the existing in-memory mode unless persistence is explicitly configured.
+PROJECT_STORE = (ProjectStore(os.environ["PROJECT_DB_PATH"],
+                             {key: value.model_dump() for key, value in PROJECTS_DB.items()})
+                 if os.environ.get("PROJECT_DB_PATH") else None)
+
+
 def resolve_owner_name(owner_id: str) -> str:
     """Fetch user name from User Service with distributed trace propagation."""
     headers = inject_trace_headers()
@@ -106,7 +113,8 @@ def health_check():
     return {
         "status": "SERVING",
         "service": "project-service",
-        "total_projects": len(PROJECTS_DB),
+        "total_projects": len(PROJECT_STORE.list()) if PROJECT_STORE else len(PROJECTS_DB),
+        "storage": "sqlite" if PROJECT_STORE else "memory",
         "version": "1.0.0"
     }
 
@@ -115,8 +123,8 @@ def get_projects():
     """Retrieve all projects with owner resolution."""
     logger.info("Fetching all projects")
     projects = []
-    for p in PROJECTS_DB.values():
-        p_dict = p.model_dump()
+    records = PROJECT_STORE.list() if PROJECT_STORE else [p.model_dump() for p in PROJECTS_DB.values()]
+    for p_dict in records:
         if not p_dict.get("owner_name") or p_dict["owner_name"] == "Team Member":
             p_dict["owner_name"] = resolve_owner_name(p_dict["owner_id"])
         projects.append(Project(**p_dict))
@@ -126,17 +134,22 @@ def get_projects():
 def get_project(project_id: str):
     """Retrieve single project by ID."""
     logger.info(f"Looking up project {project_id}")
-    if project_id not in PROJECTS_DB:
+    record = PROJECT_STORE.get(project_id) if PROJECT_STORE else (PROJECTS_DB[project_id].model_dump() if project_id in PROJECTS_DB else None)
+    if record is None:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
-    proj = PROJECTS_DB[project_id]
+    proj = Project(**record)
     owner_name = resolve_owner_name(proj.owner_id)
     return Project(**{**proj.model_dump(), "owner_name": owner_name})
 
 @app.post("/projects", response_model=Project, status_code=201)
 def create_project(data: ProjectCreate):
     """Create new project and resolve owner with User Service."""
-    new_id = f"proj-{len(PROJECTS_DB) + 101}"
     owner_name = resolve_owner_name(data.owner_id)
+    if PROJECT_STORE:
+        stored = PROJECT_STORE.create({**data.model_dump(), "owner_name": owner_name})
+        logger.info("Created persistent project %s", stored["id"])
+        return Project(**stored)
+    new_id = f"proj-{len(PROJECTS_DB) + 101}"
     new_proj = Project(
         id=new_id,
         name=data.name,

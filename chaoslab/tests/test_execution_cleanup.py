@@ -86,6 +86,28 @@ class ExecutionCleanupTests(unittest.TestCase):
         self.cleanup.assert_not_called()
         self.save.assert_not_called()
 
+    def persistence_config(self):
+        self.config['application']={'enabled':True,'persistence_check':{'enabled':True,
+            'create':{'method':'POST','path':'/projects','port':8002},
+            'read_path':'/projects/{id}','verify_fields':['id','name']}}
+
+    def test_unverifiable_persistence_baseline_prevents_injection(self):
+        self.persistence_config()
+        with patch.object(engine.PersistenceProber,'prepare',return_value={'passed':False}):
+            self.assertFalse(self.run_experiment())
+        self.apply.assert_not_called()
+        self.cleanup.assert_not_called()
+
+    def test_lost_data_fails_even_when_pod_readiness_recovers(self):
+        self.persistence_config()
+        seed={'passed':True,'record_id':'before-fault','expected':{'id':'before-fault','name':'saved'}}
+        with patch.object(engine.PersistenceProber,'prepare',return_value=seed), \
+             patch.object(engine.PersistenceProber,'verify',return_value={'enabled':True,'passed':False,'record_id':'before-fault','error':'record lost'}):
+            self.assertFalse(self.run_experiment())
+        self.assertEqual(self.save.call_args.args[1]['verdict'],'FAIL')
+        self.assertTrue(self.save.call_args.args[1]['replacement_ready'])
+        self.cleanup.assert_called_once()
+
 
 class CleanupCommandTests(unittest.TestCase):
     def test_cleanup_waits_for_deletion_with_bounded_timeout(self):

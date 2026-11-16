@@ -278,6 +278,23 @@ class ApplicationFunctionalRule(VerificationRule):
 
         return RuleResult(self.name, func_passed, msg, observed=observed, expected="CONFIRMED_OK", status=status)
 
+class ApplicationPersistenceRule(VerificationRule):
+    name = "application_data_persisted"
+    description = "The record created before injection must retain its ID and verified fields after recovery."
+
+    def evaluate(self, evidence, config):
+        application = config.get("application") or config.get("verification", {}).get("application", {})
+        spec = application.get("persistence_check") or {}
+        if not spec.get("enabled", bool(spec)):
+            return RuleResult(self.name, True, "Persistence verification not configured.", observed="N/A", expected="N/A", status=RuleStatus.NOT_APPLICABLE)
+        result = evidence.get("application", {}).get("persistence", {})
+        passed = result.get("passed", False) is True and bool(result.get("record_id"))
+        return RuleResult(self.name, passed,
+                          f"Pre-fault record {result.get('record_id')} retained its verified contents." if passed else result.get("error", "Persisted data could not be verified"),
+                          observed=result.get("record_id", "missing"), expected="same record and contents after recovery",
+                          status=RuleStatus.PASS if passed else RuleStatus.FAIL)
+
+
 class ApplicationLogsRule(VerificationRule):
     """Verifies that container logs confirm clean startup without fatal exceptions or crashes."""
 
@@ -344,12 +361,15 @@ class TelemetryRecordedRule(VerificationRule):
         spans_count = telemetry.get("spans_count", 0)
         service = telemetry.get("service") or tel_config.get("service_name", "target")
 
-        passed = traces_count > 0
+        required = tel_config.get("required_services") or []
+        passed = (telemetry.get("available", False) and traces_count > 0
+                  and (not required or telemetry.get("distributed_traces_count", 0) > 0)
+                  and (not tel_config.get("require_transaction_trace") or telemetry.get("requested_trace_id") in telemetry.get("sample_trace_ids", [])))
         if passed:
             msg = f"Distributed tracing active: {traces_count} traces ({spans_count} spans) captured for '{service}'."
             status = RuleStatus.PASS
         else:
-            msg = f"No distributed traces found for service '{service}' in Jaeger."
+            msg = telemetry.get("error") or f"No matching transaction trace spanning the required services for '{service}'."
             status = RuleStatus.FAIL
 
         return RuleResult(self.name, passed, msg, observed=traces_count, expected=">0", status=status)
@@ -373,7 +393,7 @@ class TelemetryErrorSpikeRule(VerificationRule):
             )
 
         telemetry = evidence.get("telemetry", {})
-        error_count = telemetry.get("error_spans_count", 0)
+        error_count = telemetry.get("fault_window_errors", telemetry.get("error_spans_count", 0))
         passed = error_count > 0
         if passed:
             msg = f"Fault impact confirmed via distributed tracing: {error_count} error span(s) recorded."
@@ -407,7 +427,7 @@ class TelemetryLatencyRule(VerificationRule):
         p95_ms = latency_info.get("p95", 0.0)
         max_allowed_p95 = float(tel_config.get("max_allowed_p95_ms", 1000.0))
 
-        passed = p95_ms <= max_allowed_p95
+        passed = telemetry.get("available", False) and telemetry.get("traces_count", 0) > 0 and telemetry.get("spans_count", 0) > 0 and p95_ms <= max_allowed_p95
         if passed:
             msg = f"Latency SLA verified: p95 latency {p95_ms:.2f}ms within threshold (<={max_allowed_p95:.1f}ms)."
             status = RuleStatus.PASS
@@ -441,6 +461,7 @@ class VerificationOracle:
                 RecoveryTimeRule(),
                 ApplicationHealthRule(),
                 ApplicationFunctionalRule(),
+                ApplicationPersistenceRule(),
                 ApplicationLogsRule(),
                 TelemetryRecordedRule(),
                 TelemetryErrorSpikeRule(),

@@ -63,7 +63,7 @@ class TransactionDemoTests(unittest.TestCase):
         demo = Path(__file__).resolve().parents[1] / "onboarding" / "demo"
         prepare = runpy.run_path(str(demo / "prepare_project_demo.py"))["prepare_manifests"]
         manifests = prepare()
-        self.assertEqual(len(manifests), 6)
+        self.assertEqual(len(manifests), 7)
         self.assertTrue(all(item["metadata"]["namespace"] == "chaoslab-demo" for item in manifests))
         for item in manifests:
             if item["kind"] == "Deployment":

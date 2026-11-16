@@ -8,6 +8,7 @@ Supports multi-application environments (Online Boutique, Project Platform, LMS)
 """
 
 import json
+from html import escape
 import os
 import re
 import uuid
@@ -117,13 +118,25 @@ class ExperimentReporter:
                 md.append(f"- **Functional Transaction Confirmation**: Processed successfully (`Entity ID: {app.get('transaction_id')}`)")
             elif app.get("functional_test_passed"):
                 md.append("- **Functional Transaction**: Processed successfully (`Status: OK`)")
-            md.append("- **Container Startup Logs**: `" + ("Clean initialization detected" if app.get("startup_log_detected") else "Not detected") + f"` ({app.get('log_error_count', 0)} fatal exceptions)\n")
+            if "startup_log_detected" in app:
+                md.append("- **Container Startup Logs**: `" + ("Clean initialization detected" if app.get("startup_log_detected") else "Not detected") + f"` ({app.get('log_error_count', 0)} fatal exceptions)\n")
+            else:
+                md.append("- **Container Startup Logs**: Not configured\n")
+
+        persistence = app.get("persistence") or {}
+        if persistence.get("enabled"):
+            md.append("## Persistent Data Recovery\n")
+            md.append(f"- **Pre-fault record**: `{persistence.get('record_id')}`")
+            md.append(f"- **Same ID and verified contents after recovery**: `{persistence.get('passed', False)}`")
+            md.append("\n```json\n" + json.dumps({"before": persistence.get("before"), "after": persistence.get("after")}, indent=2) + "\n```\n")
 
         # Distributed Tracing & Telemetry Evidence
         if telemetry.get("available") and telemetry.get("traces_count", 0) > 0:
             lat = telemetry.get("latency_ms", {})
             md.append("## Distributed Tracing & Telemetry (OpenTelemetry / Jaeger)\n")
             md.append(f"- **Target Service**: `{telemetry.get('service')}`")
+            md.append(f"- **Services observed in correlated trace**: `{', '.join(telemetry.get('services_observed', []))}`")
+            md.append(f"- **Requested transaction trace**: `{telemetry.get('requested_trace_id', 'not configured')}`")
             md.append(f"- **Traces Captured**: `{telemetry.get('traces_count')}` ({telemetry.get('spans_count')} spans)")
             md.append(f"- **Error Spans**: `{telemetry.get('error_spans_count')}` ({telemetry.get('error_rate_pct')}% error rate)")
             md.append(f"- **Latency Distribution**: min `{lat.get('min')}ms` | avg `{lat.get('avg')}ms` | **p50** `{lat.get('p50')}ms` | **p95** `{lat.get('p95')}ms` | max `{lat.get('max')}ms`")
@@ -155,6 +168,23 @@ class ExperimentReporter:
         oracle = data.get("oracle_evaluation", {})
         app = data.get("application", {})
         telemetry = data.get("telemetry", {})
+        persistence = app.get("persistence") or {}
+        persistence_html = ""
+        if persistence.get("enabled"):
+            evidence_json = escape(json.dumps({"before": persistence.get("before"), "after": persistence.get("after")}, indent=2))
+            persistence_html = ("<div class='section'><h2>Persistent Data Recovery</h2>"
+                                f"<p>Pre-fault record: <code>{escape(str(persistence.get('record_id')))}</code></p>"
+                                f"<p>Same ID and verified contents after recovery: <strong>{bool(persistence.get('passed'))}</strong></p>"
+                                f"<pre style='white-space:pre-wrap;overflow-wrap:anywhere'>{evidence_json}</pre></div>")
+        tracing_details_html = ""
+        if telemetry.get("available") and telemetry.get("requested_trace_id"):
+            trace_id = str(telemetry["requested_trace_id"])
+            services = escape(", ".join(telemetry.get("services_observed", [])))
+            query_url = str(telemetry.get("trace_query_url", "http://127.0.0.1:16686")).rstrip("/")
+            trace_link = escape(query_url + "/trace/" + trace_id, quote=True)
+            tracing_details_html = ("<div class='section'><h2>Correlated Transaction Trace</h2>"
+                                    f"<p>Services observed: <strong>{services}</strong></p>"
+                                    f"<p><a href='{trace_link}' target='_blank' rel='noopener'>Open transaction trace {escape(trace_id)}</a></p></div>")
         timeline = cls._compute_timeline(data)
         k8s_events = data.get("kubernetes_events", [])
         app_group = data.get("application_group") or "Microservices Demo"
@@ -472,11 +502,13 @@ class ExperimentReporter:
             <div class="app-highlight">
                 <p><strong>Health Probe:</strong> <code>{app.get('health_status', 'N/A')}</code> &mdash; Verified operational</p>
                 {f"<p><strong>Functional Confirmation:</strong> Valid entity processed (<code>ID: {app.get('transaction_id')}</code>)</p>" if app.get('transaction_id') else ("<p><strong>Functional Transaction:</strong> Processed successfully (Status: <code>200 OK</code>)</p>" if app.get('functional_test_passed') else "")}
-                <p><strong>Container Logs:</strong> {"Clean startup confirmed" if app.get('startup_log_detected') else "Startup pattern missing"} ({app.get('log_error_count', 0)} fatal errors)</p>
+                <p><strong>Container Logs:</strong> {("Clean startup confirmed" if app.get('startup_log_detected') else "Startup pattern missing") + f" ({app.get('log_error_count', 0)} fatal errors)" if 'startup_log_detected' in app else "Not configured"}</p>
             </div>
         </div>
         ''' if app.get('enabled') else ''}
 
+        {persistence_html}
+        {tracing_details_html}
         <!-- Telemetry Section -->
         {telemetry_html}
 
