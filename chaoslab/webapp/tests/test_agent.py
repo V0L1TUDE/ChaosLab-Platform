@@ -236,3 +236,31 @@ class AgentEndToEndTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NamespaceCheckTests(unittest.TestCase):
+    """Typos in --allowed-namespaces must stop the agent at start-up with a suggestion, not silently report nothing."""
+
+    def fake(self, existing, forbidden=False):
+        def kubectl(args, timeout=25):
+            if forbidden:
+                return False, 'Error from server (Forbidden): namespaces "x" is forbidden'
+            if args[:2] == ["get", "namespace"]:
+                return (True, f"namespace/{args[2]}") if args[2] in existing else (False, f'Error from server (NotFound): namespaces "{args[2]}" not found')
+            if args[:2] == ["get", "namespaces"]:
+                return True, "\n".join(f"namespace/{n}" for n in existing)
+            return False, "unexpected"
+        return kubectl
+
+    def test_typo_is_detected_and_a_fix_suggested(self):
+        k = self.fake(["default", "project-platform", "kube-system"])
+        self.assertEqual(agent_mod.missing_namespaces(["project-platfrom", "default"], k), ["project-platfrom"])
+        self.assertEqual(agent_mod.suggest_namespaces(["project-platfrom"], k), {"project-platfrom": "project-platform"})
+
+    def test_existing_namespaces_pass(self):
+        self.assertEqual(agent_mod.missing_namespaces(["default", "project-platform"], self.fake(["default", "project-platform"])), [])
+
+    def test_restricted_rbac_does_not_block_start(self):
+        # a least-privilege agent may not be allowed to read namespace objects: unknown != missing
+        self.assertEqual(agent_mod.missing_namespaces(["shop"], self.fake([], forbidden=True)), [])
+        self.assertEqual(agent_mod.suggest_namespaces(["shop"], self.fake([], forbidden=True)), {})
