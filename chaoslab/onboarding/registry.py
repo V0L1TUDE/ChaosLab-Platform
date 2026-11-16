@@ -122,14 +122,25 @@ class ApplicationRegistry:
         if completed.returncode:
             return {"connected": False, "pods": [], "error": completed.stderr.strip()[:300] or "kubectl returned an error"}
         try:
-            pods = json.loads(completed.stdout).get("items", [])
-        except (ValueError, AttributeError):
+            pods = json.loads(completed.stdout)["items"]
+            if not isinstance(pods, list):
+                raise ValueError("Pod list expected")
+            summaries = []
+            for pod in pods:
+                metadata = pod.get("metadata", {})
+                status = pod.get("status", {})
+                ready = (status.get("phase") == "Running"
+                         and not metadata.get("deletionTimestamp")
+                         and any(c.get("type") == "Ready" and c.get("status") == "True"
+                                 for c in status.get("conditions", [])))
+                summaries.append({"name": metadata.get("name", ""),
+                                  "phase": status.get("phase", "Unknown"), "ready": ready})
+        except (ValueError, KeyError, TypeError, AttributeError):
             return {"connected": False, "pods": [], "error": "Invalid response from Kubernetes"}
-        return {"connected": True, "count": len(pods), "pods": [
-            {"name": p.get("metadata", {}).get("name", ""),
-             "phase": p.get("status", {}).get("phase", "Unknown")}
-            for p in pods[:50]
-        ]}
+        ready_count = sum(p["ready"] for p in summaries)
+        return {"connected": True, "count": len(pods), "pods": summaries[:50],
+                "ready_count": ready_count, "expected_replicas": app["expected_replicas"],
+                "workload_ready": ready_count >= app["expected_replicas"]}
 
     def generate_experiment(self, app_id: str) -> dict:
         app = self.get(app_id)

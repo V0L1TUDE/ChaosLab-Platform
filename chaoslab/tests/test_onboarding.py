@@ -67,6 +67,33 @@ class OnboardingTests(unittest.TestCase):
             self.assertEqual(command[:3], ["kubectl", "get", "pods"])
             self.assertIn("app=test-shop", command)
 
+    def test_readiness_requires_ready_condition_and_nonterminating_pods(self):
+        app = self.registry.register(self.payload)
+        def pod(phase="Running", ready="True", deleting=False):
+            return {"metadata": {"name": "pod", **({"deletionTimestamp": "now"} if deleting else {})},
+                    "status": {"phase": phase, "conditions": [{"type": "Ready", "status": ready}]}}
+        cases = [([], 0, False), ([pod(ready="False")], 0, False),
+                 ([pod(deleting=True), pod(phase="Pending")], 0, False),
+                 ([pod()], 1, False), ([pod(), pod()], 2, True)]
+        for pods, count, ready in cases:
+            with self.subTest(pods=pods), patch("onboarding.registry.subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stdout = json.dumps({"items": pods})
+                result = self.registry.discover_pods(app["id"])
+                self.assertEqual(result["ready_count"], count)
+                self.assertEqual(result["workload_ready"], ready)
+                self.assertEqual(result["expected_replicas"], 2)
+
+    def test_discovery_handles_missing_tools_and_malformed_responses(self):
+        app = self.registry.register(self.payload)
+        with patch("onboarding.registry.subprocess.run", side_effect=FileNotFoundError):
+            self.assertFalse(self.registry.discover_pods(app["id"])["connected"])
+        for response in ('null', '{}', '{"items": null}', '{"items": [null]}', 'not json'):
+            with self.subTest(response=response), patch("onboarding.registry.subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stdout = response
+                self.assertFalse(self.registry.discover_pods(app["id"])["connected"])
+
     def test_unknown_application_rejected(self):
         with self.assertRaises(ApplicationError):
             self.registry.generate_experiment("aaaaaaaaaaaa")

@@ -42,7 +42,12 @@ Then register:
 - Pod label: `chaoslab-sample`
 - Expected ready replicas: `2`
 
-Click **Check matching pods**, then **Generate Pod Kill draft**. No fault is
+Click **Check matching pods** to compare Ready, non-terminating pods with the
+registered replica count. Running pods without a Ready condition do not count.
+An empty result usually means the namespace or `app` label does not match the
+deployed workload. The existing `demo-service` registration does not match this
+sample; register `chaoslab-sample` with two expected replicas for this manifest.
+Then click **Generate Pod Kill draft**. No fault is
 executed by either operation. To see the generated draft in the original
 runner, use `PYTHONDONTWRITEBYTECODE=1 python chaoslab/runner.py list`.
 
