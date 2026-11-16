@@ -9,6 +9,8 @@ Supports multi-application environments (Online Boutique, Project Platform, LMS)
 
 import json
 import os
+import re
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -524,20 +526,31 @@ class ExperimentReporter:
 
     @classmethod
     def save_all(cls, experiment_name: str, report_data: Dict[str, Any], reports_dir: str) -> Dict[str, str]:
-        """Save JSON, Markdown, and HTML reports to disk."""
+        """Archive each run and retain latest exports for CLI/quality-gate compatibility."""
         os.makedirs(reports_dir, exist_ok=True)
-        clean_name = experiment_name.lower().replace("-", "_")
-
-        json_path = os.path.join(reports_dir, f"{clean_name}_report.json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(report_data, f, indent=2)
-
-        md_path = os.path.join(reports_dir, f"{clean_name}_report.md")
-        with open(md_path, "w", encoding="utf-8") as f:
-            f.write(cls.generate_markdown(report_data))
-
-        html_path = os.path.join(reports_dir, f"{clean_name}_report.html")
-        with open(html_path, "w", encoding="utf-8") as f:
-            f.write(cls.generate_html(report_data))
-
-        return {"json": json_path, "markdown": md_path, "html": html_path}
+        clean_name = re.sub(r"[^a-z0-9_]", "_", experiment_name.lower().replace("-", "_"))
+        run_id = uuid.uuid4().hex
+        data = {**report_data, "run_id": run_id}
+        contents = {"html": cls.generate_html(data), "md": cls.generate_markdown(data),
+                    "json": json.dumps(data, indent=2)}
+        archive = os.path.join(reports_dir, "runs", run_id)
+        os.makedirs(archive, exist_ok=False)
+        paths = {}
+        # JSON is written last, so history only discovers complete report sets.
+        for extension, content in contents.items():
+            filename = f"{clean_name}_report.{extension}"
+            path = os.path.join(archive, filename)
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write(content)
+            paths[{"md": "markdown"}.get(extension, extension)] = path
+        for extension, content in contents.items():
+            latest = os.path.join(reports_dir, f"{clean_name}_report.{extension}")
+            temporary = os.path.join(reports_dir, f".{clean_name}.{run_id}.tmp")
+            try:
+                with open(temporary, "w", encoding="utf-8") as stream:
+                    stream.write(content)
+                os.replace(temporary, latest)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+        return paths

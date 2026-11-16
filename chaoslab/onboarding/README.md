@@ -98,3 +98,16 @@ ports/timeouts are accepted by onboarding. The selected container must provide
 Python or curl. A rejected status or unreachable endpoint fails the health rule;
 pod readiness alone cannot satisfy an enabled HTTP check. This does not verify
 business transactions or distributed traces.
+
+### Review experiment history
+
+The dashboard's **Historical Experiment Reports** section lists each archived run,
+its verdict, recovery time, and passed/failed/skipped check counts. HTML, Markdown,
+and JSON links open the exact run. Times display in the browser's local timezone.
+Reports created before run archiving remain visible as legacy latest results;
+unavailable check counts are shown explicitly.
+
+New engine reports are archived under `chaoslab/reports/runs/<run-id>/` and ignored
+by Git. Existing `<experiment>_report.*` latest exports are retained for the CLI
+and quality gate. Report timestamps come from experiment evidence rather than
+file-copy times. Saving a report does not run an experiment.

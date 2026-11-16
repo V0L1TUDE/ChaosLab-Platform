@@ -885,7 +885,7 @@
                         <thead>
                             <tr>
                                 <th>Experiment</th>
-                                <th>Verdict</th>
+                                <th>Verdict / Checks</th>
                                 <th>Recovery</th>
                                 <th>Formats</th>
                             </tr>
@@ -1215,18 +1215,19 @@
                     <tr>
                         <td>
                             <strong>${escapeHtml(r.experiment)}</strong>
-                            <div style="font-size:11px; color:var(--text-muted);">${r.timestamp} &bull; ${escapeHtml(r.target)}</div>
+                            <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(new Date(r.timestamp).toLocaleString())} &bull; ${escapeHtml(r.target)}</div>
                         </td>
                         <td>
-                            <span class="badge-pill ${r.verdict === 'PASS' ? 'pass' : 'fail'}">${r.verdict}</span>
+                            <span class="badge-pill ${r.verdict === 'PASS' ? 'pass' : 'fail'}">${escapeHtml(r.verdict)}</span>
+                            <div style="font-size:11px; color:var(--text-muted);">${r.passed_checks == null ? 'Check counts unavailable' : `${escapeHtml(r.passed_checks)} passed · ${escapeHtml(r.failed_checks)} failed · ${escapeHtml(r.skipped_checks)} skipped`}</div>
                         </td>
                         <td>
-                            <code>${r.recovery_time ? r.recovery_time + 's' : 'N/A'}</code>
+                            <code>${r.recovery_time != null ? escapeHtml(r.recovery_time) + 's' : 'N/A'}</code>
                         </td>
                         <td>
-                            ${r.has_html ? `<a href="/api/reports/${r.prefix}_report.html" target="_blank" class="report-link">HTML</a>` : ''}
-                            ${r.has_md ? `<a href="/api/reports/${r.prefix}_report.md" target="_blank" class="report-link">MD</a>` : ''}
-                            <a href="/api/reports/${r.filename}" target="_blank" class="report-link">JSON</a>
+                            ${r.has_html ? `<a href="/api/reports/${encodeURI(r.prefix)}_report.html" target="_blank" class="report-link">HTML</a>` : ''}
+                            ${r.has_md ? `<a href="/api/reports/${encodeURI(r.prefix)}_report.md" target="_blank" class="report-link">MD</a>` : ''}
+                            <a href="/api/reports/${encodeURI(r.filename)}" target="_blank" class="report-link">JSON</a>
                         </td>
                     </tr>
                 `).join('');
@@ -1236,7 +1237,7 @@
         }
 
         function escapeHtml(text) {
-            if (!text) return "";
+            if (text == null) return "";
             return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 

@@ -2,3 +2,8 @@
 __pycache__/
 *.py[cod]
 onboarding/data/
+
+# Immutable local experiment history (latest exports retain existing behavior)
+reports/runs/
+# Latest exports for locally registered workloads
+reports/registered_*_report.*

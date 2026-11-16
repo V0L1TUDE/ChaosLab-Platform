@@ -12,6 +12,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
 import mimetypes
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -220,38 +221,58 @@ def get_cluster_status(namespace: str = "all") -> Dict[str, Any]:
     except Exception as e:
         return {"connected": False, "error": str(e), "pods": []}
 
+def resolve_report_file(filename: str) -> Path | None:
+    """Serve only report formats inside the configured report directory."""
+    if not re.fullmatch(r"(?:runs/[0-9a-f]{32}/)?[A-Za-z0-9_.-]+_report\.(?:html|md|json)", filename):
+        return None
+    root = Path(REPORTS_DIR).resolve()
+    target = (root / filename).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        return None
+    return target
+
+
 def get_historical_reports() -> List[Dict[str, Any]]:
-    """List historical experiment reports with structured metadata."""
-    if not os.path.exists(REPORTS_DIR):
-        return []
-
+    """List immutable run archives and legacy exports, without latest-copy duplicates."""
+    root = Path(REPORTS_DIR)
     reports = []
-    for filepath in glob.glob(os.path.join(REPORTS_DIR, "*_report.json")):
-        basename = os.path.basename(filepath)
-        clean_prefix = basename.replace("_report.json", "")
+    archived_ids = set()
+    files = sorted(root.glob("runs/*/*_report.json")) + sorted(root.glob("*_report.json"))
+    for filepath in files:
+        relative = filepath.relative_to(root).as_posix()
+        if resolve_report_file(relative) is None:
+            continue
         try:
-            mtime = os.path.getmtime(filepath)
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
+            data = json.loads(filepath.read_text(encoding="utf-8"))
+            run_id = data.get("run_id")
+            archived = relative.startswith("runs/")
+            if not archived and run_id in archived_ids:
+                continue
+            prefix = relative.removesuffix("_report.json")
+            raw_time = data.get("timestamps", {}).get("experiment_start")
+            timestamp = datetime.fromisoformat(raw_time.replace("Z", "+00:00")) if raw_time else datetime.fromtimestamp(filepath.stat().st_mtime, timezone.utc)
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            evaluation = data.get("oracle_evaluation") or {}
             reports.append({
-                "filename": basename,
-                "prefix": clean_prefix,
-                "experiment": data.get("experiment", clean_prefix),
-                "target": data.get("target", "unknown"),
-                "fault": data.get("fault", "pod-kill"),
-                "verdict": data.get("verdict", "UNKNOWN"),
+                "filename": relative, "prefix": prefix, "run_id": run_id,
+                "experiment": data.get("experiment", filepath.stem),
+                "target": data.get("target", "unknown"), "fault": data.get("fault", "unknown"),
+                "namespace": data.get("namespace", "unknown"), "verdict": data.get("verdict", "UNKNOWN"),
                 "recovery_time": data.get("recovery_time_seconds"),
                 "p95_ms": data.get("telemetry", {}).get("latency_ms", {}).get("p95"),
-                "timestamp": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S"),
-                "has_html": os.path.exists(os.path.join(REPORTS_DIR, f"{clean_prefix}_report.html")),
-                "has_md": os.path.exists(os.path.join(REPORTS_DIR, f"{clean_prefix}_report.md")),
-                "has_json": True
+                "timestamp": timestamp.astimezone(timezone.utc).isoformat(),
+                "passed_checks": evaluation.get("passed_rules"),
+                "failed_checks": evaluation.get("failed_rules"),
+                "skipped_checks": evaluation.get("skipped_rules"),
+                "has_html": resolve_report_file(prefix + "_report.html") is not None,
+                "has_md": resolve_report_file(prefix + "_report.md") is not None, "has_json": True,
             })
-        except Exception:
-            pass
-
-    reports.sort(key=lambda r: r["timestamp"], reverse=True)
+            if archived and run_id:
+                archived_ids.add(run_id)
+        except (ValueError, TypeError, AttributeError, OSError):
+            continue
+    reports.sort(key=lambda row: row["timestamp"], reverse=True)
     return reports
 
 class DashboardRequestHandler(BaseHTTPRequestHandler):
@@ -394,10 +415,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         # API: Serve Individual Report Files (/api/reports/<filename>)
         if path.startswith("/api/reports/"):
             raw_filename = path.replace("/api/reports/", "")
-            filename = os.path.basename(urllib.parse.unquote(raw_filename))
-            target_file = os.path.join(REPORTS_DIR, filename)
+            filename = urllib.parse.unquote(raw_filename)
+            target_file = resolve_report_file(filename)
 
-            if os.path.exists(target_file) and os.path.isfile(target_file):
+            if target_file is not None:
                 mime, _ = mimetypes.guess_type(target_file)
                 if filename.endswith(".md"):
                     mime = "text/markdown; charset=utf-8"
