@@ -129,3 +129,34 @@ endpoint. Supported fields: `type: http`, `method: GET`, `path`, `port`,
 without this option removes it from the draft. Python or curl must be available
 inside the selected container. Existing manually configured transaction probes
 are preserved; onboarding does not expose write operations.
+
+### Local project create/read-back experiment
+
+The repository's project and user services can be exercised in `chaoslab-demo`
+without publishing an image or exposing an external port. From the repository
+root, with the project's Python environment active:
+
+```sh
+python chaoslab/onboarding/demo/prepare_project_demo.py > /tmp/chaoslab-project-demo.yaml
+kubectl --context docker-desktop apply -f /tmp/chaoslab-project-demo.yaml
+kubectl --context docker-desktop -n chaoslab-demo rollout status deployment/chaoslab-user
+kubectl --context docker-desktop -n chaoslab-demo rollout status deployment/chaoslab-project
+```
+
+The manifest helper embeds current repository source in ConfigMaps and installs
+its pinned dependencies in each pod's temporary volume. This is a local demo
+recipe; it is not an image-based production deployment. Both services run as
+non-root users and their services are cluster-internal only. The existing namespace
+must already exist, and Chaos Mesh namespace filtering must explicitly permit it.
+
+`chaoslab/onboarding/demo/project_transaction_experiment.yaml` is a dedicated
+operator-reviewed configuration, separate from read-only onboarding. Its target
+is only `app=chaoslab-project` in `chaoslab-demo`. After one pod is replaced, it
+checks `/health`, POSTs a disposable project, GETs the returned ID, and verifies
+its name, owner ID and resolved owner name. The `readback` option fails the
+functional rule if the returned entity ID or expected fields differ.
+
+Run it only on the verified disposable local cluster using a kubeconfig pinned
+to that cluster. The project store is in memory: this tests new transactions
+after recovery, not survival of existing records. Repeated tests create disposable
+records; removing a pod loses its records. Telemetry is not configured.

@@ -7,3 +7,5 @@ onboarding/data/
 reports/runs/
 # Latest exports for locally registered workloads
 reports/registered_*_report.*
+# Latest exports for the dedicated local transaction demo
+reports/local_project_create_readback_report.*

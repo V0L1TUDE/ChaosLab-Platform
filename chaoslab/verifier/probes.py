@@ -12,6 +12,7 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.request
+import urllib.parse
 import urllib.error
 
 def run_command(command: List[str], input_text: Optional[str] = None, timeout: int = 15) -> subprocess.CompletedProcess:
@@ -281,11 +282,36 @@ class HttpProber:
                     passed = False
                     failures.append(f"Required JSON key missing or null: {expected_key}")
 
+                readback_details = None
+                readback = func_spec.get("readback")
+                if passed and readback is not None:
+                    # POST confirmation alone is insufficient when read-back is configured.
+                    if (not isinstance(readback, dict) or not isinstance(readback.get("path"), str)
+                            or "{id}" not in readback["path"] or found_id is None
+                            or not isinstance(readback.get("expected_json", {}), dict)):
+                        passed = False
+                        failures.append("Read-back requires an entity ID, path containing {id}, and expected_json object")
+                    else:
+                        readback_path = readback["path"].replace("{id}", urllib.parse.quote(found_id, safe=""))
+                        readback_details = HttpProber.execute_functional_test(pod_name, namespace, {
+                            "type": "http", "method": "GET", "path": readback_path, "port": port,
+                            "timeout": timeout, "expected_status": readback.get("expected_status", 200),
+                            "expected_json_key": expected_key or "id"})
+                        actual = readback_details.get("parsed_json")
+                        passed = (readback_details.get("passed", False)
+                                  and readback_details.get("transaction_id") == found_id
+                                  and isinstance(actual, dict)
+                                  and all(actual.get(k) == v and k in actual
+                                          for k, v in readback.get("expected_json", {}).items()))
+                        if not passed:
+                            failures.append("Read-back did not return the created entity with expected contents")
+
                 return {
                     "passed": passed,
                     "error": "; ".join(failures) if failures else None,
                     "status_code": status,
                     "transaction_id": found_id,
+                    "readback": readback_details,
                     "response_body": body[:500],
                     "parsed_json": parsed_json,
                     "details": f"Functional {method} {target_url} returned {status} (ID: {found_id})"

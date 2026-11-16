@@ -1,0 +1,42 @@
+name: local-project-create-readback
+application_group: Local Project Transactions
+target:
+  namespace: chaoslab-demo
+  label:
+    app: chaoslab-project
+fault:
+  type: pod-kill
+  mode: one
+recovery:
+  timeout_seconds: 120
+  expected_ready_replicas: 1
+application:
+  enabled: true
+  health_probe:
+    type: http
+    path: /health
+    port: 8002
+    expected_status: 200
+  functional_check:
+    enabled: true
+    type: http
+    method: POST
+    path: /projects
+    port: 8002
+    expected_status: 201
+    expected_json_key: id
+    timeout: 5
+    headers:
+      Content-Type: application/json
+    body:
+      name: ChaosLab recovery verification
+      description: Disposable post-recovery test project
+      owner_id: usr-1
+    readback:
+      path: /projects/{id}
+      expected_json:
+        name: ChaosLab recovery verification
+        owner_id: usr-1
+        owner_name: Alice Chen
+telemetry:
+  enabled: false
