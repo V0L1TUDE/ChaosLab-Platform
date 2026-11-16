@@ -23,11 +23,12 @@ class ApplicationTests(unittest.TestCase):
         c.register()
         apps = c.get("/api/applications")[1]["applications"]
         demo = [a for a in apps if a["is_builtin"]]
-        self.assertEqual(len(demo), 1)
-        self.assertEqual(demo[0]["services_count"], 11)
+        self.assertEqual([a["slug"] for a in demo], ["online-boutique", "learning-platform", "project-platform"])
+        self.assertEqual([a["services_count"] for a in demo], [11, 4, 4])   # static fallback (discovery disabled in tests)
         self.assertEqual(c.delete(f"/api/applications/{demo[0]['id']}")[0], 403)
         detail = c.get(f"/api/applications/{demo[0]['id']}")[1]["application"]
         self.assertEqual(len(detail["catalog"]["faults"]), 3)
+        self.assertEqual(detail["catalog"]["discovery"]["source"], "static")
 
     def test_upload_list_delete(self):
         c = Client()

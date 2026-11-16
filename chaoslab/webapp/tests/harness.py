@@ -14,6 +14,7 @@ import uuid
 _TMP = tempfile.mkdtemp(prefix="chaoslab-test-")
 os.environ["CHAOSLAB_DATA_DIR"] = _TMP
 os.environ["CHAOSLAB_SIM_SPEED"] = "0.01"
+os.environ["CHAOSLAB_DISCOVERY_ENABLED"] = "false"  # deterministic static service lists
 os.environ["CHAOSLAB_LIVE_ENABLED"] = "false"   # tests never touch a real cluster
 os.environ["CHAOSLAB_MAX_UPLOAD_MB"] = "1"
 

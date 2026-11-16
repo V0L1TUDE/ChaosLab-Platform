@@ -5,8 +5,8 @@ import unittest
 from harness import Client
 
 
-def demo_app_id(c):
-    return [a for a in c.get("/api/applications")[1]["applications"] if a["is_builtin"]][0]["id"]
+def demo_app_id(c, slug="online-boutique"):
+    return [a for a in c.get("/api/applications")[1]["applications"] if a.get("slug") == slug][0]["id"]
 
 
 def run_sim(c, service="paymentservice", fault="pod-kill", duration=30, app_id=None):
@@ -147,7 +147,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(d["totals"]["successful"], 1)
         self.assertEqual(d["totals"]["failed"], 1)
         self.assertEqual(d["totals"]["simulated"], 2)
-        self.assertEqual(d["totals"]["applications"], 1)
+        self.assertEqual(d["totals"]["applications"], 3)  # the three built-in demos
         self.assertEqual(len(d["recent"]), 2)
 
     def test_oracle_catalog(self):

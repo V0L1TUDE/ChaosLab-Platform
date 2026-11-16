@@ -39,6 +39,7 @@ cd chaoslab && python -m unittest discover -s webapp/tests
 | `CHAOSLAB_MAX_UPLOAD_MB` | `10` | Upload size limit |
 | `CHAOSLAB_SESSION_TTL_SECONDS` | `604800` | Session lifetime |
 | `CHAOSLAB_COOKIE_SECURE` | `false` | Set `true` behind HTTPS (adds `Secure` to the cookie) |
+| `CHAOSLAB_DISCOVERY_ENABLED` | `true` | Read services from the cluster (`kubectl get deployments -A`); `false` forces the static list |
 | `CHAOSLAB_LIVE_ENABLED` | `true` | `false` disables Live mode (recommended on shared/public deployments) |
 | `CHAOSLAB_SIM_SPEED` | `1.0` | Simulation pacing multiplier (about 25 s per run at 1.0) |
 | `CHAOSLAB_MAX_ACTIVE_PER_USER` | `3` | Concurrent experiments per user |
@@ -64,6 +65,16 @@ telemetry), `verifier/oracle.py` (all 11 invariants and PASS/FAIL/SKIPPED/NOT_AP
 modes), `verifier/reporter.py` (Live runs also expose the engine's native HTML report as `engine-html`),
 the curated experiment YAMLs in `experiments/` (their application/telemetry probes are used for Live runs of
 the matching service+fault), and the Online Boutique deployment as the demo application.
+
+### Built-in applications and service discovery
+Three built-in applications are seeded (`catalog.BUILTIN_APPS`): Online Boutique (`default`), Learning Management
+(`learning-platform`) and Project Management (`project-platform`). Their services are **discovered from the
+cluster** with one cached (10 s) `kubectl get deployments -A -o json`: the `app` label is the target, with desired/ready
+replicas shown. A small static table only adds metadata (language, protocol, description); services it does not know are
+still listed with `unknown` metadata. Datastores, Jaeger and the load generator are listed but not targetable. If the
+cluster or the namespace is unavailable the list falls back to the static table, the UI says so, and **Live execution is
+refused** for that application (Simulated still works). Curated YAMLs are matched per namespace + service + fault, so
+Live runs of e.g. `course-service` or `task-service` reuse their real HTTP health/functional probes.
 
 ### Live vs Simulated (kept logically separate)
 * **Live**: writes the resolved experiment as a normal ChaosLab YAML, calls `engine.verify_experiment`, maps its
@@ -136,6 +147,8 @@ mode for the curated experiments that configure probes (e.g. `paymentservice` po
 * Uploaded applications are not deployed or executed; only the built-in Online Boutique runs.
 * Live mode targets one shared cluster with a global one-run-at-a-time lock; any signed-in user may run Live
   faults against it (disable with `CHAOSLAB_LIVE_ENABLED=false` on shared deployments).
+* Live network faults: the engine does not measure recovery (it reports a nominal 0.5 s after a fixed 5 s window), so
+  recovery time is shown as "not measured" for them.
 * Live latency time-series need Jaeger telemetry; otherwise only readiness is charted. The engine's network-fault path
   has a fixed 5 s observation window and a nominal recovery value (existing engine behaviour).
 * Stdlib HTTP server, SQLite and in-memory login throttling suit a single instance, not horizontal scale.

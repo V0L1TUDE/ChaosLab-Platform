@@ -3,18 +3,19 @@
 from . import catalog, db
 
 
-def seed_demo_application() -> None:
+def seed_builtin_applications() -> None:
     with db.session() as conn:
-        row = conn.execute("SELECT id FROM applications WHERE slug = ?", (catalog.DEMO_SLUG,)).fetchone()
-        if row:
-            conn.execute("UPDATE applications SET name = ?, description = ? WHERE id = ?",
-                         (catalog.DEMO_NAME, catalog.DEMO_DESCRIPTION, row["id"]))
-        else:
-            conn.execute(
-                "INSERT INTO applications (user_id, name, description, upload_type, status, slug, created_at) "
-                "VALUES (NULL, ?, ?, 'builtin', 'ready', ?, ?)",
-                (catalog.DEMO_NAME, catalog.DEMO_DESCRIPTION, catalog.DEMO_SLUG, db.utcnow()),
-            )
+        for app in catalog.BUILTIN_APPS:
+            row = conn.execute("SELECT id FROM applications WHERE slug = ?", (app["slug"],)).fetchone()
+            if row:
+                conn.execute("UPDATE applications SET name = ?, description = ? WHERE id = ?",
+                             (app["name"], app["description"], row["id"]))
+            else:
+                conn.execute(
+                    "INSERT INTO applications (user_id, name, description, upload_type, status, slug, created_at) "
+                    "VALUES (NULL, ?, ?, 'builtin', 'ready', ?, ?)",
+                    (app["name"], app["description"], app["slug"], db.utcnow()),
+                )
 
 
 def recover_interrupted_experiments() -> int:
@@ -30,7 +31,7 @@ def recover_interrupted_experiments() -> int:
 
 
 def on_startup() -> None:
-    seed_demo_application()
+    seed_builtin_applications()
     n = recover_interrupted_experiments()
     if n:
         print(f"Recovered {n} interrupted experiment(s) -> failed.")

@@ -154,7 +154,7 @@ async function pageDashboard() {
     <div class="page-head"><div><h1>Dashboard</h1><p>Welcome back, ${S.user.name}. Your resilience activity at a glance.</p></div>
       <a class="btn primary" href="#/experiments/new">⚡ New experiment</a></div>
     <div class="grid g4" style="margin-bottom:16px">
-      ${stat('Applications', t.applications, 'including the built-in demo')}
+      ${stat('Applications', t.applications, 'including the 3 built-in demos')}
       ${stat('Experiments', t.experiments, `${t.live} live · ${t.simulated} simulated`)}
       ${stat('Successful', t.successful, 'Oracle verdict PASS')}
       ${stat('Failed', t.failed, 'Oracle FAIL or execution error')}
@@ -192,7 +192,7 @@ function experimentsTable(list, opts) {
 async function pageApps() {
   const {applications} = await api('GET', '/api/applications');
   render(shell('#/apps', h`
-    <div class="page-head"><div><h1>Applications</h1><p>Register your own applications or use the built-in demo.</p></div></div>
+    <div class="page-head"><div><h1>Applications</h1><p>Register your own applications or use the built-in demos.</p></div></div>
     <div class="grid" style="grid-template-columns:3fr 2fr;align-items:start">
       <div class="card"><div class="card-title"><h2>Your applications</h2></div>
         <div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Uploaded</th><th></th></tr></thead><tbody>
@@ -212,7 +212,7 @@ async function pageApps() {
             <div class="hint">.zip .tar .tar.gz .tgz .yaml .yml .json .md .txt · max 10 MB. Files are stored for registration only and are never executed.</div></div>
           <button class="btn primary" type="submit">Upload</button>
         </form>
-        <div class="banner info" style="margin:16px 0 0">Experiment execution is available for the built-in demo application. Uploaded applications are registered and stored only in this MVP.</div>
+        <div class="banner info" style="margin:16px 0 0">Experiment execution is available for the built-in demo applications. Uploaded applications are registered and stored only in this MVP.</div>
       </div>
     </div>`));
 }
@@ -242,7 +242,7 @@ async function pageAppDetail(id) {
       <div class="actions">${a.executable ? h`<a class="btn primary" href="#/experiments/new?app=${a.id}">⚡ Run experiment</a>`
         : h`<button class="btn danger" data-action="delete-app" data-id="${a.id}" data-name="${a.name}" data-then="apps">Delete</button>`}</div></div>
     <div class="grid g4" style="margin-bottom:16px">
-      <div class="stat"><div class="l">Services</div><div class="v">${cat ? cat.services_count : 'n/a'}</div><div class="s">${cat ? 'microservices in the demo' : 'discovery not available in MVP'}</div></div>
+      <div class="stat"><div class="l">Services</div><div class="v">${cat ? cat.services_count : 'n/a'}</div><div class="s">${cat ? (cat.discovery.source === 'cluster' ? 'discovered from the cluster' : 'static list (cluster unavailable)') : 'discovery not available in MVP'}</div></div>
       <div class="stat"><div class="l">Experiments</div><div class="v">${a.experiments_count}</div><div class="s">your runs on this app</div></div>
       <div class="stat"><div class="l">Fault types</div><div class="v">${cat ? cat.faults.length : 'n/a'}</div><div class="s">${cat ? 'pod kill, network delay, network failure' : ''}</div></div>
       <div class="stat"><div class="l">Registered</div><div class="v" style="font-size:16px;padding-top:8px">${fmtDate(a.created_at)}</div><div class="s">${a.is_builtin ? 'preconfigured' : a.original_filename + ' · ' + fmtBytes(a.file_size)}</div></div>
@@ -250,9 +250,12 @@ async function pageAppDetail(id) {
     ${a.note ? h`<div class="banner info">${a.note}</div>` : ''}
     ${cat ? h`<div class="grid g2" style="align-items:start">
       <div class="card"><div class="card-title"><h2>Services (namespace <code>${cat.namespace}</code>)</h2></div>
-        <div class="table-wrap"><table><thead><tr><th>Service</th><th>Stack</th><th></th></tr></thead><tbody>
+        ${discoveryNote(cat.discovery, a.id)}
+        <div class="table-wrap"><table><thead><tr><th>Service</th><th>Stack</th><th>Ready</th><th></th></tr></thead><tbody>
         ${cat.services.map(s => h`<tr><td class="mono">${s.name}<div class="muted small" style="font-family:inherit">${s.description}</div></td>
-          <td class="small">${s.language} · ${s.protocol}</td><td>${s.targetable ? '' : h`<span class="badge b-NA">NOT TARGETABLE</span>`}</td></tr>`)}
+          <td class="small">${s.language} · ${s.protocol}</td>
+          <td class="small">${s.ready != null ? h`<span class="badge ${s.ready >= 1 ? 'b-completed' : 'b-failed'}">${s.ready}/${s.replicas}</span>` : raw('<span class="faint">n/a</span>')}</td>
+          <td>${s.targetable ? '' : h`<span class="badge b-NA">NOT TARGETABLE</span>`}</td></tr>`)}
         </tbody></table></div></div>
       <div>
         <div class="card"><div class="card-title"><h2>Available experiments</h2></div>
@@ -269,30 +272,45 @@ async function pageAppDetail(id) {
     </div>`));
 }
 
+/* ---------- service discovery status ---------- */
+function discoveryNote(d, refreshId) {
+  const refresh = refreshId ? h` <button class="btn sm" data-action="refresh-services" data-id="${refreshId}">Refresh</button>` : '';
+  return d.source === 'cluster'
+    ? h`<div class="banner live" style="margin:10px 0 0">Services discovered from the Kubernetes cluster at ${fmtTime(d.discovered_at)}.${refresh}</div>`
+    : h`<div class="banner info" style="margin:10px 0 0">Static service list (cluster discovery unavailable: ${d.error}). Live execution is disabled for this application.${refresh}</div>`;
+}
+
 /* ---------- new experiment ---------- */
 async function pageNewExperiment(appParam) {
   const [{applications}, capsRes] = await Promise.all([api('GET', '/api/applications'), api('GET', '/api/capabilities')]);
-  const demo = applications.find(a => a.is_builtin);
-  const detail = (await api('GET', `/api/applications/${demo.id}`)).application;
-  const cat = detail.catalog;
-  const modes = capsRes.modes;
-  const form = {service: 'paymentservice', fault: 'pod-kill', duration: 30, mode: 'simulated'};   // safe default: Live must be chosen deliberately
+  const builtins = applications.filter(a => a.is_builtin);
   const requested = appParam ? applications.find(a => a.id === +appParam) : null;
+  let current = requested && requested.executable ? requested : builtins[0];
+  const cats = {};
+  const loadCat = async a => cats[a.id] || (cats[a.id] = (await api('GET', `/api/applications/${a.id}`)).application.catalog);
+  let cat = await loadCat(current);
+  const modes = capsRes.modes;
+  const firstSvc = c => c.targetable_services.includes('paymentservice') ? 'paymentservice' : c.targetable_services[0];
+  const form = {service: firstSvc(cat), fault: 'pod-kill', duration: 30, mode: 'simulated'};   // safe default: Live must be chosen deliberately
 
   const draw = () => {
     const fault = cat.faults.find(f => f.id === form.fault);
+    const liveOk = modes.live.available && cat.discovery.source === 'cluster';
+    const liveWhy = !modes.live.available ? modes.live.reason : 'This application was not found in the cluster (service list is static).';
+    if (form.mode === 'live' && !liveOk) form.mode = 'simulated';
     const choice = (name, value, title, sub, selected, disabled) => h`<label class="choice ${selected ? 'sel' : ''} ${disabled ? 'disabled' : ''}">
       <input type="radio" name="${name}" value="${value}" ${selected ? 'checked' : ''} ${disabled ? 'disabled' : ''}>${title}<small>${sub}</small></label>`;
     render(shell('#/experiments/new', h`
       <div class="page-head"><div><h1>New experiment</h1><p>Choose a target and a fault, then review and run.</p></div></div>
-      ${requested && !requested.executable ? h`<div class="banner info">“${requested.name}” is an uploaded application and cannot be executed in this MVP. Experiments run against the built-in demo application below.</div>` : ''}
+      ${requested && !requested.executable ? h`<div class="banner info">“${requested.name}” is an uploaded application and cannot be executed in this MVP. Experiments run against a built-in demo application below.</div>` : ''}
       <div class="grid" style="grid-template-columns:2fr 1fr;align-items:start">
       <form data-form="experiment" id="exp-form">
         <div class="card"><h3><span class="step-n">1</span>Application</h3>
-          <div class="choices" style="margin-top:10px">${choice('app', demo.id, demo.name, `${cat.services_count} services · preconfigured`, true, false)}</div></div>
+          <div class="choices" style="margin-top:10px">${builtins.map(a => choice('app', a.id, a.name, `${a.services_count} services · preconfigured`, a.id === current.id, false))}</div></div>
         <div class="card"><h3><span class="step-n">2</span>Target microservice</h3>
+          ${discoveryNote(cat.discovery)}
           <div class="choices" style="margin-top:10px">${cat.services.filter(s => s.targetable).map(s =>
-            choice('service', s.name, s.name, `${s.language} · ${s.protocol}`, form.service === s.name, false))}</div></div>
+            choice('service', s.name, s.name, `${s.language} · ${s.protocol}${s.ready != null ? ` · ${s.ready}/${s.replicas} ready` : ''}`, form.service === s.name, false))}</div></div>
         <div class="card"><h3><span class="step-n">3</span>Fault type</h3>
           <div class="choices" style="margin-top:10px">${cat.faults.map(f => choice('fault', f.id, f.label, f.chaos_kind, form.fault === f.id, false))}</div>
           <div class="hint">${fault.description}</div></div>
@@ -301,7 +319,7 @@ async function pageNewExperiment(appParam) {
           <div class="hint">${fault.duration_meaning}</div></div>
         <div class="card"><h3><span class="step-n">5</span>Execution mode</h3>
           <div class="choices" style="margin-top:10px;grid-template-columns:1fr 1fr">
-            ${choice('mode', 'live', 'Live execution', modes.live.available ? 'Real Chaos Mesh fault on the cluster' : modes.live.reason, form.mode === 'live', !modes.live.available)}
+            ${choice('mode', 'live', 'Live execution', liveOk ? 'Real Chaos Mesh fault on the cluster' : liveWhy, form.mode === 'live', !liveOk)}
             ${choice('mode', 'simulated', 'Demo execution (SIMULATED)', 'Predefined data, nothing is injected', form.mode === 'simulated', false)}
           </div>
           ${form.mode === 'live' ? h`<div class="banner live" style="margin:12px 0 0">Live mode really injects the fault into the shared demo cluster using Chaos Mesh. Only one live experiment can run at a time.</div>`
@@ -309,15 +327,20 @@ async function pageNewExperiment(appParam) {
         </div>
       </form>
       <div class="card" style="position:sticky;top:20px"><h2>Review configuration</h2>
-        <dl class="review"><dt>Application</dt><dd>${demo.name}</dd><dt>Target microservice</dt><dd class="mono">${form.service}</dd>
+        <dl class="review"><dt>Application</dt><dd>${current.name}</dd><dt>Target microservice</dt><dd class="mono">${form.service}</dd>
           <dt>Fault</dt><dd>${fault.label}</dd><dt>Duration</dt><dd>${form.duration}s</dd>
           <dt>Execution mode</dt><dd>${form.mode === 'live' ? 'Live' : 'Demo (SIMULATED)'}</dd></dl>
         <div id="run-error" style="margin-top:12px"></div>
         <button class="btn primary" style="width:100%;justify-content:center;margin-top:14px" data-action="run-experiment">▶ Run experiment</button>
       </div></div>`));
     const f = document.getElementById('exp-form');
-    f.addEventListener('change', e => {
+    f.addEventListener('change', async e => {
       const n = e.target.name;
+      if (n === 'app') {
+        current = builtins.find(a => a.id === +e.target.value);
+        try { cat = await loadCat(current); } catch (err) { return toast(err.message, 'err'); }
+        if (!cat.targetable_services.includes(form.service)) form.service = firstSvc(cat);
+      }
       if (n === 'service') form.service = e.target.value;
       if (n === 'fault') form.fault = e.target.value;
       if (n === 'mode') form.mode = e.target.value;
@@ -333,7 +356,7 @@ async function pageNewExperiment(appParam) {
   window.__runExperiment = async () => {
     const err = document.getElementById('run-error'); err.innerHTML = '';
     try {
-      const r = await api('POST', '/api/experiments', {application_id: demo.id, target_service: form.service,
+      const r = await api('POST', '/api/experiments', {application_id: current.id, target_service: form.service,
         fault_type: form.fault, duration_seconds: form.duration, mode: form.mode});
       location.hash = `#/experiments/${r.experiment.id}`;
     } catch (e) { err.innerHTML = h`<div class="banner err">${e.message}</div>`.s; }
@@ -434,6 +457,7 @@ async function pageMonitor(id) {
             <dt>Post-recovery p95</dt><dd>${num(m && m.post_recovery_p95_ms, ' ms')}</dd>
             <dt>Peak error rate</dt><dd>${num(m && m.peak_error_rate)}</dd>
             <dt>Error spans / traces</dt><dd>${num(m && m.error_spans)} / ${num(m && m.traces_count)}</dd></dl>
+          ${r && !sim ? r.notes.slice(1).map(n => h`<div class="hint">${n}</div>`) : ''}
           <div class="grid" style="margin-top:14px">
             ${lineChart(samples, 'replicas_ready', 'Ready replicas over time (s)', '#34d399', sim)}
             ${lineChart(samples, 'p95_ms', 'p95 latency (ms) over time (s)', '#60a5fa', sim)}
@@ -531,6 +555,13 @@ document.addEventListener('click', async ev => {
       toast('Application deleted.', 'ok');
       if (el.dataset.then === 'apps') location.hash = '#/apps'; else await pageApps();
     } catch (e) { toast(e.message, 'err'); }
+  } else if (action === 'refresh-services') {
+    el.disabled = true;
+    try {
+      const {application} = await api('GET', `/api/applications/${el.dataset.id}?refresh=1`);
+      toast(`Re-discovered services (${application.catalog.discovery.source}).`, 'ok');
+      await pageAppDetail(+el.dataset.id);
+    } catch (e) { toast(e.message, 'err'); el.disabled = false; }
   } else if (action === 'run-experiment') {
     el.disabled = true;
     await window.__runExperiment();

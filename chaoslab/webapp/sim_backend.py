@@ -107,8 +107,9 @@ def _build_ticks(service: str, fault_id: str, duration: int, p: Dict[str, Any]) 
     return ticks
 
 
-def _build_evidence(service: str, fault_id: str, p: Dict[str, Any]) -> Dict[str, Any]:
+def _build_evidence(service: str, fault_id: str, p: Dict[str, Any], probe_type: str) -> Dict[str, Any]:
     tag = p["tag"]
+    grpc = probe_type == "grpc"
     return {
         "baseline": {"pod_name": f"{service}-sim-{tag}", "ready_replicas": 1, "ready": "1/1", "status": "Running"},
         "fault_injected": True,
@@ -121,7 +122,8 @@ def _build_evidence(service: str, fault_id: str, p: Dict[str, Any]) -> Dict[str,
         "recovery_time_seconds": p["recovery"],
         "total_recovery_seconds": round(p["recovery"] + 2.0, 1),
         "application": {
-            "enabled": True, "probe_type": "grpc", "health_check_passed": True, "health_status": "SERVING",
+            "enabled": True, "probe_type": probe_type, "health_check_passed": True,
+            "health_status": "SERVING" if grpc else 200,
             "functional_test_passed": True, "transaction_id": f"SIM-{tag}", "startup_log_detected": True,
             "log_error_count": 0,
         },
@@ -152,7 +154,8 @@ class SimulatedBackend(ExecutionBackend):
                 sink.sample(point)
             time.sleep(tk["pause"] * config.SIM_SPEED)
 
-        evidence = _build_evidence(service, fault_id, p)
+        probe_type = spec["engine_config"]["application"]["health_probe"]["type"]
+        evidence = _build_evidence(service, fault_id, p, probe_type)
         oracle = engine_bridge.oracle().VerificationOracle()
         evaluation = oracle.evaluate(evidence, spec["engine_config"])
         sink.event("completed", f"Simulated run finished. Oracle verdict: {evaluation['verdict']}.", "info", 100)
