@@ -12,6 +12,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -26,6 +27,7 @@ VERIFIER_DIR = os.path.join(CHAOSLAB_DIR, "verifier")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 REPORTS_DIR = os.path.join(CHAOSLAB_DIR, "reports")
 EXPERIMENTS_DIR = os.path.join(CHAOSLAB_DIR, "experiments")
+ONBOARDING_HTML = os.path.join(CHAOSLAB_DIR, "onboarding", "static", "index.html")
 
 # Ensure verifier and chaoslab directories are in sys.path
 for path in [BASE_DIR, CHAOSLAB_DIR, VERIFIER_DIR]:
@@ -35,6 +37,7 @@ for path in [BASE_DIR, CHAOSLAB_DIR, VERIFIER_DIR]:
 from runner import discover_experiments, find_experiment_path
 from payment_verifier import verify_experiment
 from gate import QualityGate
+from onboarding.registry import ApplicationRegistry, ApplicationError
 
 class ExecutionManager:
     """Thread-safe state manager for asynchronous experiment execution and progress tracking."""
@@ -254,6 +257,35 @@ def get_historical_reports() -> List[Dict[str, Any]]:
 class DashboardRequestHandler(BaseHTTPRequestHandler):
     """HTTP Request Handler providing REST API endpoints and static assets."""
 
+    def _write_json(self, status: int, payload: Dict[str, Any]):
+        self._set_headers(status)
+        self.wfile.write(json.dumps(payload).encode("utf-8"))
+
+    def _require_local_origin(self) -> bool:
+        """Basic browser cross-site protection, not a substitute for auth."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        expected = f"http://{self.headers.get('Host', '')}"
+        return origin == expected and self.headers.get("Host", "").split(":")[0] in {"localhost", "127.0.0.1"}
+
+    def _read_registration_json(self) -> Dict[str, Any]:
+        if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+            raise ApplicationError("Content-Type must be application/json")
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as error:
+            raise ApplicationError("Invalid content length") from error
+        if not 2 <= length <= 4096:
+            raise ApplicationError("JSON body must be between 2 and 4096 bytes")
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (ValueError, UnicodeError) as error:
+            raise ApplicationError("Invalid JSON") from error
+        if not isinstance(payload, dict):
+            raise ApplicationError("JSON object expected")
+        return payload
+
     def _set_headers(self, status: int = 200, content_type: str = "application/json"):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -281,6 +313,26 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._set_headers(404, "text/plain")
                 self.wfile.write(b"Dashboard index.html not found.")
             return
+
+        # Local-only application onboarding page (separate from existing dashboard).
+        if path == "/onboarding":
+            if not os.path.isfile(ONBOARDING_HTML):
+                return self._write_json(404, {"error": "Onboarding page missing"})
+            self._set_headers(200, "text/html; charset=utf-8")
+            with open(ONBOARDING_HTML, "rb") as source:
+                self.wfile.write(source.read())
+            return
+
+        if path == "/api/onboarding/apps":
+            return self._write_json(200, {"applications": ApplicationRegistry().list_apps()})
+
+        status_match = re.fullmatch(r"/api/onboarding/apps/([0-9a-f]{12})/pods", path)
+        if status_match:
+            try:
+                result = ApplicationRegistry().discover_pods(status_match.group(1))
+                return self._write_json(200, result)
+            except ApplicationError as error:
+                return self._write_json(400, {"error": str(error)})
 
         # API: Available Application Namespaces
         if path == "/api/namespaces":
@@ -384,7 +436,28 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
+        # Local-only onboarding write endpoints. Nothing is deployed or executed here.
+        if path == "/api/onboarding/apps" or re.fullmatch(r"/api/onboarding/apps/[0-9a-f]{12}/experiment", path):
+            if not self._require_local_origin():
+                return self._write_json(403, {"error": "Cross-origin write requests are not permitted"})
+            try:
+                payload = self._read_registration_json()
+                registry = ApplicationRegistry()
+                if path == "/api/onboarding/apps":
+                    return self._write_json(201, {"application": registry.register(payload)})
+                app_id = path.split("/")[4]
+                if payload.get("fault_type", "pod-kill") != "pod-kill":
+                    raise ApplicationError("Only pod-kill drafts are supported in this MVP")
+                return self._write_json(201, {"experiment": registry.generate_experiment(app_id)})
+            except ApplicationError as error:
+                return self._write_json(400, {"error": str(error)})
+
         if path == "/api/run":
+            # Explicit opt-in because the old endpoint lacks authorization.
+            if os.environ.get("CHAOSLAB_ENABLE_FAULT_RUNS") != "1":
+                return self._write_json(403, {"error": "Fault execution disabled by default. Use an isolated cluster and set CHAOSLAB_ENABLE_FAULT_RUNS=1 only after verifying the target."})
+            if not self._require_local_origin():
+                return self._write_json(403, {"error": "Cross-origin launch rejected"})
             content_length = int(self.headers.get("Content-Length", 0))
             body_bytes = self.rfile.read(content_length) if content_length > 0 else b"{}"
 
@@ -433,8 +506,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         """Suppress standard HTTP request output in CLI."""
         pass
 
-def run_server(host: str = "0.0.0.0", port: int = 8080):
-    """Start multi-threaded HTTP server for ChaosLab Web Dashboard."""
+def run_server(host: str = "127.0.0.1", port: int = 8080):
+    """Start local-only development server. Not suitable for public hosting."""
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError("Local MVP must bind to loopback; public hosting requires authentication and CSRF protection")
     server_address = (host, port)
     httpd = HTTPServer(server_address, DashboardRequestHandler)
     print("====================================================================================================")

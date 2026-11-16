@@ -20,6 +20,7 @@ import yaml
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CHAOSLAB_DIR = os.path.join(BASE_DIR, "chaoslab")
 EXPERIMENTS_DIR = os.path.join(CHAOSLAB_DIR, "experiments")
+ONBOARDING_EXPERIMENTS_DIR = os.path.join(CHAOSLAB_DIR, "onboarding", "data", "experiments")
 VERIFIER_DIR = os.path.join(CHAOSLAB_DIR, "verifier")
 REPORTS_DIR = os.path.join(CHAOSLAB_DIR, "reports")
 
@@ -33,10 +34,11 @@ from engine import verify_experiment
 def discover_experiments() -> List[Dict[str, Any]]:
     """Scan experiments directory for declarative YAML experiment files."""
     experiments = []
-    if not os.path.exists(EXPERIMENTS_DIR):
-        return []
-
-    yaml_files = glob.glob(os.path.join(EXPERIMENTS_DIR, "*.yaml")) + glob.glob(os.path.join(EXPERIMENTS_DIR, "*.yml"))
+    # Built-in experiment suite + drafts generated for locally registered applications.
+    yaml_files = []
+    for directory in (EXPERIMENTS_DIR, ONBOARDING_EXPERIMENTS_DIR):
+        yaml_files.extend(glob.glob(os.path.join(directory, "*.yaml")))
+        yaml_files.extend(glob.glob(os.path.join(directory, "*.yml")))
     for file_path in yaml_files:
         try:
             with open(file_path, "r", encoding="utf-8") as f:

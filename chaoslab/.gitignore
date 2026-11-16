@@ -1,0 +1,4 @@
+# Local Python cache and onboarding runtime data
+__pycache__/
+*.py[cod]
+onboarding/data/
