@@ -35,6 +35,12 @@ cd chaoslab && python -m unittest discover -s webapp/tests
 | `CHAOSLAB_DATA_DIR` | `chaoslab/webapp/data` | Root for DB, uploads, reports (git-ignored) |
 | `CHAOSLAB_DB_PATH` | `<data>/chaoslab.db` | SQLite file |
 | `CHAOSLAB_UPLOAD_DIR` | `<data>/uploads` | Uploaded files when `CHAOSLAB_STORAGE=local` |
+| `CHAOSLAB_DEPLOY_ENABLED` | = `CHAOSLAB_LIVE_ENABLED` | Allow deploying uploaded manifests to the cluster |
+| `CHAOSLAB_DEPLOY_TTL_MINUTES` | `120` | Auto-undeploy age (`0` disables) |
+| `CHAOSLAB_DEPLOY_TIMEOUT_SECONDS` | `180` | Wait for workloads to become Ready |
+| `CHAOSLAB_MAX_DEPLOYED_PER_USER` / `_TOTAL` | `2` / `6` | Concurrent deployed apps |
+| `CHAOSLAB_MAX_REPLICAS` | `3` | Max replicas per uploaded Deployment |
+| `CHAOSLAB_ALLOWED_REGISTRIES` | docker.io, ghcr.io, gcr.io, quay.io, registry.k8s.io, public.ecr.aws, mcr.microsoft.com | Allowed image registries (comma separated) |
 | `CHAOSLAB_STORAGE` | `local` | `local` or `s3` for uploaded application files |
 | `CHAOSLAB_S3_BUCKET` | (none) | Required for `s3`. Private bucket name |
 | `CHAOSLAB_S3_REGION` | AWS default | Bucket region |
@@ -72,6 +78,29 @@ telemetry), `verifier/oracle.py` (all 11 invariants and PASS/FAIL/SKIPPED/NOT_AP
 modes), `verifier/reporter.py` (Live runs also expose the engine's native HTML report as `engine-html`),
 the curated experiment YAMLs in `experiments/` (their application/telemetry probes are used for Live runs of
 the matching service+fault), and the Online Boutique deployment as the demo application.
+
+### Uploaded applications: validate, deploy, test (strict sandbox)
+Upload Kubernetes manifests (a `.yaml`, or a `.zip` containing `.yaml` files; see `examples/hello-two-tier.yaml`).
+
+1. **Validate (at upload, in memory)**: `manifests.py` accepts only `Deployment`, `Service` (ClusterIP) and `ConfigMap`, and only a
+   whitelisted subset of their fields. It rejects privileged containers, host network/PID/paths, capabilities, Secrets, PVCs, RBAC,
+   Ingress, NodePort/LoadBalancer, init containers, service accounts, any unknown field, YAML anchors/aliases, oversized or
+   malformed files. Images must pin a tag (not `latest`) or digest and come from an allowed registry. Replicas, CPU and memory are capped.
+   A missing `app` label is added automatically (ChaosLab targets pods by it). The sanitized result is stored in the DB:
+   what is deployed is exactly what was validated. Status becomes `validated` or `invalid` (with every error listed).
+2. **Deploy (button, background job)**: namespace `cl-app-<id>` (derived from the numeric id) with Pod Security `baseline`
+   enforcement, ResourceQuota, LimitRange, a default-deny NetworkPolicy (in-namespace + DNS only), and workloads hardened at
+   apply time (no service-account token, no service links, seccomp RuntimeDefault, no privilege escalation).
+   It waits for readiness; on failure it reports pod reasons (e.g. `ImagePullBackOff`), cleans up and allows a retry.
+3. **Test**: services are discovered from the sandbox namespace; Live experiments run the real engine against it; Simulated runs
+   work as soon as the manifests validate. Live verification of uploaded apps covers the infrastructure invariants; application and
+   telemetry invariants are `N/A` (no probes are known for arbitrary apps).
+4. **Clean up**: Undeploy, deleting the app, or the TTL reaper (default 120 min) removes the namespace. Teardown only deletes a
+   namespace carrying ChaosLab's managed label **and** the matching app id, and is refused while an experiment is running.
+
+Limits (env vars in the table above): per-user and global deployed-app caps, deploy timeout, TTL, allowed registries, max replicas.
+Verified on a real cluster: the privileged-pod attempt is rejected by Pod Security admission, in-namespace traffic works and
+internet egress is blocked (NetworkPolicy enforcement depends on the cluster's CNI; kindnet enforces it).
 
 ### Storage backends (local or S3)
 `storage.py` defines `put(key, data) -> ref` and an idempotent `delete(ref)`. Validation always runs first; only
@@ -118,7 +147,7 @@ Live runs of e.g. `course-service` or `task-service` reuse their real HTTP healt
 Stored outside the DB through the storage backend (key `user_<id>/<uuid>.<ext>`), metadata in `applications`. Validation: extension
 allow-list, size limit, content sniffing (ZIP/gzip/TAR structure, UTF-8 text, JSON parse), archive path-traversal
 and link checks, executable/shebang rejection, sanitized display filename. Files are **never extracted or executed**,
-and cannot be downloaded back through the API. Uploaded apps are registered only; experiments run on the built-in demo.
+and cannot be downloaded back through the API. Kubernetes manifest uploads can additionally be deployed (next section).
 
 ## Database schema
 
@@ -170,7 +199,10 @@ mode for the curated experiments that configure probes (e.g. `paymentservice` po
 `N/A` otherwise. Simulated runs evaluate all groups on predefined evidence (still `N/A` for `target_impact` on network faults).
 
 ## Remaining limitations
-* Uploaded applications are not deployed or executed; only the built-in Online Boutique runs.
+* Uploaded apps must be Kubernetes manifests (Deployment/Service/ConfigMap with registry images): no Secrets, volumes beyond
+  emptyDir/ConfigMap, Ingress, StatefulSets, init containers, or building from source. Application/telemetry invariants are N/A for them.
+* The sandbox shares the cluster's nodes and kernel (namespace + admission + quota + network policy isolation, not a VM boundary);
+  do not expose deployment to untrusted public users without stronger isolation (gVisor/Kata, dedicated node pool).
 * Live mode targets one shared cluster with a global one-run-at-a-time lock; any signed-in user may run Live
   faults against it (disable with `CHAOSLAB_LIVE_ENABLED=false` on shared deployments).
 * Live network faults: the engine does not measure recovery (it reports a nominal 0.5 s after a fixed 5 s window), so
@@ -181,7 +213,7 @@ mode for the curated experiments that configure probes (e.g. `paymentservice` po
 * No password reset / e-mail verification / roles; no CSRF tokens beyond SameSite + Origin checks.
 
 ## Roadmap to a production platform
-1. Deploy uploaded apps into per-user namespaces (manifest/Helm/container import) with resource quotas, then
+1. Extend uploads beyond manifests (Helm charts, image-only import, source builds), add user-supplied HTTP probes, then
    register them as additional `ExecutionBackend` targets.
 2. Remote execution agents (outbound-connected) for customer clusters; job queue instead of worker threads.
 3. Postgres + migrations, S3-style artifact storage, a real WSGI/ASGI server behind TLS, shared rate limiting.

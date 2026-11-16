@@ -209,10 +209,10 @@ async function pageApps() {
           <div class="field"><label>Application name</label><input type="text" name="name" maxlength="80" required></div>
           <div class="field"><label>Description</label><textarea name="description" rows="3" maxlength="500"></textarea></div>
           <div class="field"><label>Application file</label><input type="file" name="file" required>
-            <div class="hint">.zip .tar .tar.gz .tgz .yaml .yml .json .md .txt · max 10 MB. Files are stored for registration only and are never executed.</div></div>
+            <div class="hint">Kubernetes manifests (.yaml, or a .zip with .yaml files) are validated and can be deployed to an isolated sandbox. Other types (.tar .tgz .json .md .txt) are stored only. Max 10 MB. Uploaded files themselves are never executed.</div></div>
           <button class="btn primary" type="submit">Upload</button>
         </form>
-        <div class="banner info" style="margin:16px 0 0">Experiment execution is available for the built-in demo applications. Uploaded applications are registered and stored only in this MVP.</div>
+        <div class="banner info" style="margin:16px 0 0">Valid Kubernetes manifests (Deployment, Service, ConfigMap) can be deployed to a sandbox namespace and tested with real chaos experiments. See the application page after uploading.</div>
       </div>
     </div>`));
 }
@@ -239,15 +239,16 @@ async function pageAppDetail(id) {
   render(shell('#/apps', h`
     <div class="page-head"><div><a href="#/apps" class="small">← Applications</a>
       <h1>${a.name} ${statusBadge(a.status)}</h1><p>${a.description || 'No description.'}</p></div>
-      <div class="actions">${a.executable ? h`<a class="btn primary" href="#/experiments/new?app=${a.id}">⚡ Run experiment</a>`
-        : h`<button class="btn danger" data-action="delete-app" data-id="${a.id}" data-name="${a.name}" data-then="apps">Delete</button>`}</div></div>
+      <div class="actions">${a.executable ? h`<a class="btn primary" href="#/experiments/new?app=${a.id}">⚡ Run experiment</a>` : ''}
+        ${a.is_builtin ? '' : h`<button class="btn danger" data-action="delete-app" data-id="${a.id}" data-name="${a.name}" data-then="apps">Delete</button>`}</div></div>
     <div class="grid g4" style="margin-bottom:16px">
-      <div class="stat"><div class="l">Services</div><div class="v">${cat ? cat.services_count : 'n/a'}</div><div class="s">${cat ? (cat.discovery.source === 'cluster' ? 'discovered from the cluster' : 'static list (cluster unavailable)') : 'discovery not available in MVP'}</div></div>
+      <div class="stat"><div class="l">Services</div><div class="v">${cat ? cat.services_count : 'n/a'}</div><div class="s">${cat ? (cat.discovery.source === 'cluster' ? 'discovered from the cluster' : (a.is_builtin ? 'static list (cluster unavailable)' : 'from your manifests (not deployed)')) : 'no services (not a valid manifest upload)'}</div></div>
       <div class="stat"><div class="l">Experiments</div><div class="v">${a.experiments_count}</div><div class="s">your runs on this app</div></div>
       <div class="stat"><div class="l">Fault types</div><div class="v">${cat ? cat.faults.length : 'n/a'}</div><div class="s">${cat ? 'pod kill, network delay, network failure' : ''}</div></div>
       <div class="stat"><div class="l">Registered</div><div class="v" style="font-size:16px;padding-top:8px">${fmtDate(a.created_at)}</div><div class="s">${a.is_builtin ? 'preconfigured' : a.original_filename + ' · ' + fmtBytes(a.file_size)}</div></div>
     </div>
     ${a.note ? h`<div class="banner info">${a.note}</div>` : ''}
+    ${a.deployment ? deploymentCard(a) : ''}
     ${cat ? h`<div class="grid g2" style="align-items:start">
       <div class="card"><div class="card-title"><h2>Services (namespace <code>${cat.namespace}</code>)</h2></div>
         ${discoveryNote(cat.discovery, a.id)}
@@ -268,8 +269,29 @@ async function pageAppDetail(id) {
         </div></div></div>` : ''}
     <div class="card"><div class="card-title"><h2>Experiment history</h2></div>
       ${a.experiments.length ? experimentsTable(a.experiments.map(e => ({...e, application_name: a.name, simulated: e.mode === 'simulated'})), {noApp: true})
-        : h`<div class="empty">${a.executable ? 'No experiments yet on this application.' : 'Experiments cannot be run on uploaded applications in this MVP.'}</div>`}
+        : h`<div class="empty">${a.executable ? 'No experiments yet on this application.' : 'Experiments can be run once the application has valid Kubernetes manifests.'}</div>`}
     </div>`));
+  if (a.status === 'deploying') {   // follow the deployment until it finishes
+    const t = setTimeout(() => { if (location.hash === `#/apps/${id}`) route(); }, 2000);
+    S.cleanup = () => clearTimeout(t);
+  }
+}
+
+function deploymentCard(a) {
+  const d = a.deployment, v = d.validation || {errors: [], warnings: [], workloads: []};
+  const sandbox = h`<div class="muted small" style="margin-top:10px">Sandbox: own namespace · pod security baseline · CPU/memory quota · default-deny network policy (in-namespace + DNS only) · approved image registries only · auto-removed after ${d.ttl_minutes} min.</div>`;
+  return h`<div class="card"><div class="card-title"><h2>Deployment</h2>
+      <div class="actions">${d.can_deploy ? h`<button class="btn primary" data-action="deploy-app" data-id="${a.id}">▲ Deploy to sandbox</button>` : ''}
+        ${a.status === 'deployed' ? h`<button class="btn" data-action="undeploy-app" data-id="${a.id}">Undeploy</button>` : ''}</div></div>
+    ${a.status === 'deploying' ? h`<div class="banner info">Deploying… waiting for workloads to become Ready (image pulls can take a minute).</div>` : ''}
+    ${a.status === 'deployed' ? h`<div class="banner live">Running in namespace <code>${d.namespace}</code>${d.expires_at ? h`. Auto-undeploys at ${fmtTime(d.expires_at)}` : ''}.</div>` : ''}
+    ${a.status === 'deploy_failed' ? h`<div class="banner err"><div><b>Deployment failed and was cleaned up.</b><br>${d.error || ''}</div></div>` : ''}
+    ${a.status === 'invalid' ? h`<div class="banner err"><div><b>Manifest validation failed.</b> Fix these and upload again:<ul style="margin:6px 0 0 18px">${v.errors.map(e => h`<li>${e}</li>`)}</ul></div></div>` : ''}
+    ${v.warnings.length ? h`<div class="banner info"><div><b>Notes</b><ul style="margin:6px 0 0 18px">${v.warnings.map(w => h`<li>${w}</li>`)}</ul></div></div>` : ''}
+    ${v.workloads.length ? h`<div class="table-wrap"><table><thead><tr><th>Workload</th><th>Image</th><th>Replicas</th><th>Ports</th></tr></thead><tbody>
+      ${v.workloads.map(w => h`<tr><td class="mono">${w.name}</td><td class="mono small">${w.images.join(', ')}</td><td>${w.replicas}</td><td class="mono small">${w.ports.join(', ') || '-'}</td></tr>`)}</tbody></table></div>` : ''}
+    ${a.status !== 'invalid' ? sandbox : ''}
+  </div>`;
 }
 
 /* ---------- service discovery status ---------- */
@@ -283,7 +305,7 @@ function discoveryNote(d, refreshId) {
 /* ---------- new experiment ---------- */
 async function pageNewExperiment(appParam) {
   const [{applications}, capsRes] = await Promise.all([api('GET', '/api/applications'), api('GET', '/api/capabilities')]);
-  const builtins = applications.filter(a => a.is_builtin);
+  const builtins = applications.filter(a => a.executable);   // built-in demos + the user's validated uploads
   const requested = appParam ? applications.find(a => a.id === +appParam) : null;
   let current = requested && requested.executable ? requested : builtins[0];
   const cats = {};
@@ -296,7 +318,7 @@ async function pageNewExperiment(appParam) {
   const draw = () => {
     const fault = cat.faults.find(f => f.id === form.fault);
     const liveOk = modes.live.available && cat.discovery.source === 'cluster';
-    const liveWhy = !modes.live.available ? modes.live.reason : 'This application was not found in the cluster (service list is static).';
+    const liveWhy = !modes.live.available ? modes.live.reason : (current.is_builtin ? 'This application was not found in the cluster (service list is static).' : 'Deploy this application to the sandbox first (Applications page).');
     if (form.mode === 'live' && !liveOk) form.mode = 'simulated';
     const choice = (name, value, title, sub, selected, disabled) => h`<label class="choice ${selected ? 'sel' : ''} ${disabled ? 'disabled' : ''}">
       <input type="radio" name="${name}" value="${value}" ${selected ? 'checked' : ''} ${disabled ? 'disabled' : ''}>${title}<small>${sub}</small></label>`;
@@ -306,7 +328,7 @@ async function pageNewExperiment(appParam) {
       <div class="grid" style="grid-template-columns:2fr 1fr;align-items:start">
       <form data-form="experiment" id="exp-form">
         <div class="card"><h3><span class="step-n">1</span>Application</h3>
-          <div class="choices" style="margin-top:10px">${builtins.map(a => choice('app', a.id, a.name, `${a.services_count} services · preconfigured`, a.id === current.id, false))}</div></div>
+          <div class="choices" style="margin-top:10px">${builtins.map(a => choice('app', a.id, a.name, a.is_builtin ? `${a.services_count} services · preconfigured` : `your upload · ${a.status}`, a.id === current.id, false))}</div></div>
         <div class="card"><h3><span class="step-n">2</span>Target microservice</h3>
           ${discoveryNote(cat.discovery)}
           <div class="choices" style="margin-top:10px">${cat.services.filter(s => s.targetable).map(s =>
@@ -555,6 +577,15 @@ document.addEventListener('click', async ev => {
       toast('Application deleted.', 'ok');
       if (el.dataset.then === 'apps') location.hash = '#/apps'; else await pageApps();
     } catch (e) { toast(e.message, 'err'); }
+  } else if (action === 'deploy-app') {
+    el.disabled = true;
+    try { await api('POST', `/api/applications/${el.dataset.id}/deploy`, {}); toast('Deployment started.', 'ok'); await pageAppDetail(+el.dataset.id); }
+    catch (e) { toast(e.message, 'err'); el.disabled = false; }
+  } else if (action === 'undeploy-app') {
+    if (!confirm('Undeploy this application? Its sandbox namespace and pods will be deleted.')) return;
+    el.disabled = true;
+    try { await api('POST', `/api/applications/${el.dataset.id}/undeploy`, {}); toast('Undeployed.', 'ok'); await pageAppDetail(+el.dataset.id); }
+    catch (e) { toast(e.message, 'err'); el.disabled = false; }
   } else if (action === 'refresh-services') {
     el.disabled = true;
     try {

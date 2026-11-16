@@ -1,8 +1,9 @@
 """Applications API: list, upload, detail, delete. Every query is scoped to the caller."""
 
+import json
 from typing import Any, Dict, Optional
 
-from . import catalog, db, uploads
+from . import catalog, db, deployments, manifests, uploads
 from .http_core import HttpError, json_response, router
 
 
@@ -18,10 +19,15 @@ def app_to_dict(row, experiments_count: int = 0) -> Dict[str, Any]:
         "is_builtin": builtin,
         "original_filename": row["original_filename"],
         "file_size": row["file_size"],
-        "executable": builtin,               # only the built-in demo app can run experiments in the MVP
+        "executable": builtin or row["status"] in ("validated", "deployed"),   # can run experiments
+        "deployable": (not builtin) and row["status"] in ("validated", "deploy_failed"),
         "experiments_count": experiments_count,
     }
     d["slug"] = row["slug"]
+    if not builtin and row["validation_json"]:
+        v = json.loads(row["validation_json"])
+        d["validation"] = {"valid": v["valid"], "errors": v["errors"], "warnings": v["warnings"]}
+        d["namespace"] = row["namespace"]
     if builtin:
         app = catalog.get_builtin(row["slug"])
         d["services_count"] = len(catalog.discover_services(app)["services"]) if app else 0
@@ -76,13 +82,22 @@ def upload_application(req):
     except uploads.UploadError as e:
         raise HttpError(e.status, str(e))
 
+    # Kubernetes manifest uploads (.yaml/.yml/.zip with yaml) are validated in memory against the strict sandbox.
+    status, manifest_json, validation_json = "registered", None, None
+    if manifests.has_manifest_candidates(meta["upload_type"], f["data"]):
+        result = manifests.analyze(meta["upload_type"], f["data"])
+        status = "validated" if result["valid"] else "invalid"
+        manifest_json = json.dumps({"resources": result["resources"]}) if result["valid"] else None
+        validation_json = json.dumps({k: result[k] for k in ("valid", "errors", "warnings", "workloads")})
+
     try:
         with db.session() as conn:
             cur = conn.execute(
                 "INSERT INTO applications (user_id, name, description, file_path, storage_backend, original_filename, "
-                "file_size, upload_type, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'registered', ?)",
+                "file_size, upload_type, status, manifest_json, validation_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (req.user["id"], name, description, meta["file_path"], meta["storage_backend"], meta["original_filename"],
-                 meta["file_size"], meta["upload_type"], db.utcnow()),
+                 meta["file_size"], meta["upload_type"], status, manifest_json, validation_json, db.utcnow()),
             )
             row = conn.execute("SELECT * FROM applications WHERE id = ?", (cur.lastrowid,)).fetchone()
     except Exception:
@@ -109,9 +124,16 @@ def application_detail(req):
     if row["user_id"] is None:
         data["catalog"] = catalog.describe_app(catalog.get_builtin(row["slug"]), force=req.qs("refresh") == "1")
     else:
-        data["note"] = ("Uploaded applications are registered and stored only. Automatic deployment and "
-                        "experiment execution for uploaded applications is not part of this MVP; run experiments "
-                        "against the built-in demo application.")
+        resolved = catalog.resolve_app(row)
+        if resolved:
+            data["catalog"] = catalog.describe_app(resolved, force=req.qs("refresh") == "1")
+            data["deployment"] = deployments.deployment_info(row)
+        elif row["status"] == "invalid":
+            data["deployment"] = deployments.deployment_info(row)
+            data["note"] = "This upload is not a valid Kubernetes manifest bundle for the sandbox. See the errors below, fix them and upload again."
+        else:
+            data["note"] = ("This file is registered and stored only. To run experiments on your own application, upload "
+                            "Kubernetes manifests (.yaml, or a .zip containing .yaml files).")
     return json_response({"application": data})
 
 
@@ -122,6 +144,13 @@ def delete_application(req):
         row = get_accessible_app(conn, uid, _app_id(req))
         if row["user_id"] is None:
             raise HttpError(403, "The built-in demo application cannot be deleted.")
+        if row["status"] == "deploying":
+            raise HttpError(409, "Deployment is still in progress. Try again in a moment.")
+        if row["status"] in ("deployed", "deploy_failed") or row["namespace"]:
+            try:                                  # never leave a sandbox namespace running without an owner
+                deployments.undeploy(row["id"], uid)
+            except deployments.DeployRejected as e:
+                raise HttpError(e.status, str(e))
         ref, backend = row["file_path"], row["storage_backend"]
         # Remove the stored object first: if the backend fails the record is kept so the delete can be retried.
         try:
@@ -130,3 +159,31 @@ def delete_application(req):
             raise HttpError(e.status, str(e))
         conn.execute("DELETE FROM applications WHERE id = ? AND user_id = ?", (row["id"], uid))
     return json_response({"ok": True})
+
+
+@router.route("POST", "/api/applications/<id>/deploy")
+def deploy_application(req):
+    with db.session() as conn:
+        row = get_accessible_app(conn, req.user["id"], _app_id(req))
+    try:
+        deployments.start_deploy(row["id"], req.user["id"])
+    except deployments.DeployRejected as e:
+        raise HttpError(e.status, str(e))
+    with db.session() as conn:
+        row = conn.execute("SELECT * FROM applications WHERE id = ?", (row["id"],)).fetchone()
+    return json_response({"deployment": deployments.deployment_info(row)}, 202)
+
+
+@router.route("POST", "/api/applications/<id>/undeploy")
+def undeploy_application(req):
+    with db.session() as conn:
+        row = get_accessible_app(conn, req.user["id"], _app_id(req))
+    if row["user_id"] is None:
+        raise HttpError(403, "Built-in applications are managed by the platform.")
+    try:
+        deployments.undeploy(row["id"], req.user["id"])
+    except deployments.DeployRejected as e:
+        raise HttpError(e.status, str(e))
+    with db.session() as conn:
+        row = conn.execute("SELECT * FROM applications WHERE id = ?", (row["id"],)).fetchone()
+    return json_response({"deployment": deployments.deployment_info(row)})

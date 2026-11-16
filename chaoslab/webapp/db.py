@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS applications (
     upload_type       TEXT    NOT NULL,       -- 'builtin' | file extension of the upload
     status            TEXT    NOT NULL,       -- 'ready' (built-in) | 'registered' (upload)
     slug              TEXT UNIQUE,            -- stable key for built-in apps
+    manifest_json     TEXT,                   -- sanitized, validated manifests (what gets deployed)
+    validation_json   TEXT,                   -- {valid, errors, warnings, workloads}
+    namespace         TEXT,                   -- sandbox namespace while deployed
+    deployed_at       TEXT,
+    deploy_error      TEXT,
     created_at        TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_applications_user ON applications(user_id);
@@ -130,3 +135,6 @@ def init_db() -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(applications)")}
         if "storage_backend" not in cols:
             conn.execute("ALTER TABLE applications ADD COLUMN storage_backend TEXT NOT NULL DEFAULT 'local'")
+        for col in ("manifest_json", "validation_json", "namespace", "deployed_at", "deploy_error"):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE applications ADD COLUMN {col} TEXT")

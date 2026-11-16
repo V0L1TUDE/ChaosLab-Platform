@@ -44,6 +44,10 @@ def check_storage() -> None:
 def on_startup() -> None:
     check_storage()
     seed_builtin_applications()
+    from . import deployments
+    d = deployments.recover_interrupted()
+    if d:
+        print(f"Recovered {d} interrupted deployment(s) -> deploy_failed.")
     n = recover_interrupted_experiments()
     if n:
         print(f"Recovered {n} interrupted experiment(s) -> failed.")
