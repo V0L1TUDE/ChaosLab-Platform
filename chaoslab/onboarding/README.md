@@ -160,3 +160,19 @@ Run it only on the verified disposable local cluster using a kubeconfig pinned
 to that cluster. The project store is in memory: this tests new transactions
 after recovery, not survival of existing records. Repeated tests create disposable
 records; removing a pod loses its records. Telemetry is not configured.
+
+### Dashboard discovery for the local transaction demo
+
+Run `prepare_project_demo.py --register-experiment` to opt the reviewed local
+transaction configuration into CLI/dashboard discovery. The helper still prints
+workload manifests to stdout; registration is reported on stderr. It stores the
+configuration under ignored `onboarding/data/experiments/`, without executing it.
+Registration is idempotent and refuses to overwrite an edited local configuration.
+Without the flag, no experiment is registered.
+
+The dashboard's namespace filter and live topology include namespaces discovered
+from registered applications and experiment configurations. Registered names label
+their matching workloads. Unregistered workloads in a discovered namespace display
+the namespace rather than being mislabeled as Online Boutique. Namespace discovery
+does not grant permission to execute a fault. Fault execution remains a separate
+explicit operator opt-in.

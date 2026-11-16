@@ -909,12 +909,31 @@
 
         async function fetchInitialData() {
             await Promise.all([
-                fetchClusterStatus(),
+                fetchNamespaces().then(fetchClusterStatus),
                 fetchExperiments(),
                 fetchExecutionState(),
                 fetchQualityGate(),
                 fetchReports()
             ]);
+        }
+
+        async function fetchNamespaces() {
+            try {
+                const response = await fetch('/api/namespaces');
+                if (!response.ok) throw Error('Namespace lookup failed');
+                const data = await response.json();
+                const select = document.getElementById('namespaceFilter');
+                const current = select.value;
+                select.replaceChildren(...data.namespaces.map(ns => {
+                    const option = document.createElement('option');
+                    option.value = ns.id;
+                    option.textContent = ns.name;
+                    return option;
+                }));
+                select.value = data.namespaces.some(ns => ns.id === current) ? current : 'all';
+            } catch (error) {
+                console.error('fetchNamespaces error:', error);
+            }
         }
 
         // 1. Fetch Kubernetes Cluster Pod Status
@@ -937,21 +956,21 @@
 
                 pillText.innerText = `Cluster: ${data.ready_pods}/${data.total_pods} Ready`;
                 dot.className = data.all_healthy ? "dot pulse-green" : "dot pulse-red";
-                countBadge.innerText = `${data.total_pods} Services`;
+                countBadge.innerText = `${data.total_pods} Pods`;
 
                 grid.innerHTML = data.pods.map(pod => `
                     <div class="service-node ${activeExecutionExperiment && activeExecutionExperiment.includes(pod.app) ? 'active-target' : ''}">
                         <div class="service-node-header">
-                            <span class="service-name">${pod.app}</span>
+                            <span class="service-name">${escapeHtml(pod.app)}</span>
                             <span class="dot ${pod.is_ready ? 'pulse-green' : 'pulse-red'}"></span>
                         </div>
                         <div class="service-meta">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
-                                <span class="badge" style="font-size:9px; padding:1px 6px; background:rgba(59,130,246,0.15); color:var(--primary); font-weight:600;">${pod.app_group || pod.namespace}</span>
-                                <code style="font-size:10px;">${pod.ready}</code>
+                                <span class="badge" style="font-size:9px; padding:1px 6px; background:rgba(59,130,246,0.15); color:var(--primary); font-weight:600;">${escapeHtml(pod.app_group || pod.namespace)}</span>
+                                <code style="font-size:10px;">${escapeHtml(pod.ready)}</code>
                             </div>
-                            <div>Pod: <code style="font-size:10px;">${pod.name.split('-').slice(1).join('-')}</code></div>
-                            <div>Status: <span class="${pod.is_ready ? 'ready' : 'not-ready'}">${pod.status}</span> &bull; ${pod.ip || 'No IP'}</div>
+                            <div>Pod: <code style="font-size:10px;">${escapeHtml(pod.name)}</code></div>
+                            <div>Status: <span class="${pod.is_ready ? 'ready' : 'not-ready'}">${escapeHtml(pod.status)}</span> &bull; ${escapeHtml(pod.ip || 'No IP')}</div>
                         </div>
                     </div>
                 `).join('');

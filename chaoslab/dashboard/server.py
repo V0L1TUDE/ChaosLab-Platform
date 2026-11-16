@@ -131,11 +131,37 @@ _CLUSTER_CACHE = {"timestamp": 0.0, "data": None}
 
 TARGET_NAMESPACES = ["default", "project-platform", "learning-platform"]
 
+LEGACY_GROUPS = {"default": "Online Boutique", "project-platform": "Project Platform", "learning-platform": "LMS Platform"}
+
+
+def get_application_catalog():
+    """Namespaces and display names from existing suites and local onboarding."""
+    namespaces = set(TARGET_NAMESPACES)
+    groups = {}
+    for experiment in discover_experiments():
+        ns = experiment.get("namespace")
+        if isinstance(ns, str) and re.fullmatch(r"[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?", ns):
+            namespaces.add(ns)
+            groups[(ns, experiment.get("target"))] = experiment.get("app_group") or ns
+    for app in ApplicationRegistry().list_apps():
+        namespaces.add(app["namespace"])
+        groups[(app["namespace"], app["app_label"])] = app["name"]
+    return namespaces, groups
+
+
+def get_available_namespaces():
+    namespaces, _ = get_application_catalog()
+    return [{"id": "all", "name": "All Applications"}] + [
+        {"id": ns, "name": f"{LEGACY_GROUPS.get(ns, ns)} ({ns})" if ns in LEGACY_GROUPS else ns}
+        for ns in sorted(namespaces)]
+
+
 def get_cluster_status(namespace: str = "all") -> Dict[str, Any]:
     """Retrieve structured Kubernetes pod status across applications with short 2s caching."""
     global _CLUSTER_CACHE
     now = time.time()
-    cache_key = f"status_{namespace}"
+    namespaces, application_groups = get_application_catalog()
+    cache_key = f"status_{namespace}_{','.join(sorted(namespaces))}"
     if _CLUSTER_CACHE.get(cache_key) and (now - _CLUSTER_CACHE[cache_key]["timestamp"] < 2.0):
         return _CLUSTER_CACHE[cache_key]["data"]
 
@@ -164,7 +190,7 @@ def get_cluster_status(namespace: str = "all") -> Dict[str, Any]:
             meta = item.get("metadata", {})
             pod_ns = meta.get("namespace", "default")
 
-            if namespace == "all" and pod_ns not in TARGET_NAMESPACES:
+            if namespace == "all" and pod_ns not in namespaces:
                 continue
 
             status = item.get("status", {})
@@ -176,17 +202,13 @@ def get_cluster_status(namespace: str = "all") -> Dict[str, Any]:
             total_containers = len(container_statuses)
             ready_containers = sum(1 for c in container_statuses if c.get("ready", False))
             ready_str = f"{ready_containers}/{total_containers}" if total_containers > 0 else "0/0"
-            is_ready = (total_containers > 0) and (ready_containers == total_containers) and (status.get("phase") == "Running")
+            is_ready = ((total_containers > 0) and (ready_containers == total_containers)
+                        and status.get("phase") == "Running" and not meta.get("deletionTimestamp")
+                        and any(c.get("type") == "Ready" and c.get("status") == "True"
+                                for c in status.get("conditions", [])))
 
-            restarts = 0
-            if container_statuses:
-                restarts = container_statuses[0].get("restartCount", 0)
-
-            app_group = "Online Boutique"
-            if pod_ns == "project-platform":
-                app_group = "Project Platform"
-            elif pod_ns == "learning-platform":
-                app_group = "LMS Platform"
+            restarts = sum(c.get("restartCount", 0) for c in container_statuses)
+            app_group = application_groups.get((pod_ns, app_name), LEGACY_GROUPS.get(pod_ns, pod_ns))
 
             pods.append({
                 "name": meta.get("name"),
@@ -359,12 +381,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/namespaces":
             self._set_headers(200)
             self.wfile.write(json.dumps({
-                "namespaces": [
-                    {"id": "all", "name": "All Platforms (Universal Suite)"},
-                    {"id": "default", "name": "Google Online Boutique (default)"},
-                    {"id": "project-platform", "name": "Project Platform (project-platform)"},
-                    {"id": "learning-platform", "name": "LMS Platform (learning-platform)"}
-                ]
+                "namespaces": get_available_namespaces()
             }).encode("utf-8"))
             return
 
