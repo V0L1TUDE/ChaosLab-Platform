@@ -105,7 +105,7 @@ def normalize_oracle(evaluation: Dict[str, Any], simulated: bool) -> Dict[str, A
             "description": descriptions.get(r["rule"], ""),
             "status": status,
             "status_label": _STATUS_LABEL.get(status, status),
-            "message": r.get("message"),
+            "message": ("[SIMULATED] " + str(r.get("message"))) if simulated else r.get("message"),
             "observed": None if r.get("observed") is None else str(r.get("observed")),
             "expected": None if r.get("expected") is None else str(r.get("expected")),
             "simulated": simulated,
