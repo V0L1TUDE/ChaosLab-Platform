@@ -647,6 +647,7 @@
             </div>
         </div>
         <div class="nav-status">
+            <a href="/onboarding" class="btn-link">＋ Applications</a>
             <div class="status-pill" id="clusterStatusPill">
                 <span class="dot pulse-green" id="clusterDot"></span>
                 <span id="clusterStatusText">Connecting to Cluster...</span>
@@ -664,6 +665,7 @@
     </header>
 
     <div class="container">
+        <div id="handoffNotice" role="status" hidden style="border:1px solid var(--border-highlight);background:var(--bg-surface);border-radius:10px;padding:16px 20px;margin-bottom:20px;color:var(--text-muted);"></div>
         <!-- 1. Microservices Topology Grid -->
         <section class="card">
             <div class="card-header">
@@ -919,6 +921,27 @@
         let preflightCheckedAt = 0;
         let launchPending = false;
         let selectedPreviewName = null;
+        let handoffHandled = false;
+        async function handleApplicationHandoff() {
+            const params = new URLSearchParams(window.location.search);
+            const name = params.get('experiment');
+            if (!name || handoffHandled) return;
+            handoffHandled = true;
+            const notice = document.getElementById('handoffNotice');
+            notice.hidden = false;
+            if (!experimentsList.some(e => e.name === name)) {
+                notice.textContent = 'This experiment is unavailable. Open Applications to prepare it again.';
+                return;
+            }
+            document.getElementById('experimentSelect').value = name;
+            updateSelectedPreview();
+            notice.textContent = 'Application connected. Your experiment is selected. Review the readiness results, confirm the target, then choose Run reviewed experiment. Preview mode keeps fault execution disabled.';
+            const studio = document.getElementById('experimentSelect').closest('section');
+            studio.id = 'chaos-studio';
+            studio.style.scrollMarginTop = '100px';
+            studio.scrollIntoView({block:'start',behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
+            if (params.get('review') === '1') await fetchPreflight();
+        }
 
         async function fetchInitialData() {
             await Promise.all([
@@ -1023,9 +1046,9 @@
                 });
 
                 select.innerHTML = Object.keys(groups).map(grp => `
-                    <optgroup label="${grp}">
+                    <optgroup label="${escapeHtml(grp)}">
                         ${groups[grp].map(exp => `
-                            <option value="${exp.name}">${exp.name} (${exp.target})</option>
+                            <option value="${escapeHtml(exp.name)}">${escapeHtml(exp.name)} (${escapeHtml(exp.target)})</option>
                         `).join('')}
                     </optgroup>
                 `).join('');
@@ -1034,6 +1057,7 @@
                     select.value = currentVal;
                 }
                 updateSelectedPreview();
+                await handleApplicationHandoff();
             } catch (err) {
                 console.error("fetchExperiments error:", err);
             }
@@ -1345,7 +1369,7 @@
 
         function escapeHtml(text) {
             if (text == null) return "";
-            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
         // Initial Load and Polling Loop (2s)

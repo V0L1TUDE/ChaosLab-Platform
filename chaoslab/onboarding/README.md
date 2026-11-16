@@ -229,3 +229,19 @@ The reviewed demo sets `telemetry.emit_client_span: true` and requires
 in-pod OpenTelemetry SDK and `COLLECTOR_ADDR` to export the client parent span;
 other custom images must provide that SDK before using the option. Receipt is
 verified from Jaeger, rather than inferred from the exporter subprocess exit.
+
+## Connected application launchpad
+
+Open `/onboarding` for the dashboard-matched application launchpad. **Register &
+open Chaos Studio** saves the registration, checks matching ready pods, generates
+a Pod Kill draft, and opens the dashboard with that exact experiment selected.
+Readiness checks start automatically. If pods are unavailable, registration stays
+saved and the application card provides a retry through **Open in Chaos Studio**.
+Opening an existing draft preserves its settings unless the optional probe inputs
+have been edited. **Save draft** explicitly writes the options shown in the card.
+
+The dashboard's **Applications** navigation returns to onboarding. Registration
+and navigation never execute a fault: execution mode, a fresh readiness review,
+and explicit target confirmation still apply. Preview mode remains read-only for
+fault execution. An unavailable experiment link displays an explanation instead
+of selecting a different target for execution.
