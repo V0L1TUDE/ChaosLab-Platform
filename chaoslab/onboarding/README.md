@@ -80,7 +80,10 @@ PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s chaoslab/tests -p 'test
   checks can be configured during draft generation.
   Application-specific HTTP/gRPC probes and telemetry need to be configured
   for each workload before claiming full application-level correctness.
-- Existing engine cleanup/cancellation needs hardening before production use.
+- Cleanup is attempted on verification errors and KeyboardInterrupt after a
+  confirmed fault creation. The engine waits up to 20 seconds for deletion and
+  fails visibly if cleanup cannot be confirmed. Process termination (SIGKILL),
+  machine failure, or losing cluster access still require operator inspection.
 
 ### Optional HTTP verification
 
@@ -176,3 +179,19 @@ their matching workloads. Unregistered workloads in a discovered namespace displ
 the namespace rather than being mislabeled as Online Boutique. Namespace discovery
 does not grant permission to execute a fault. Fault execution remains a separate
 explicit operator opt-in.
+
+### Fault cleanup and conflicting runs
+
+A run now creates its Chaos Mesh resource instead of replacing an existing one.
+If the same resource name already exists, creation fails and that existing
+resource is left untouched. Inspect it and its owner before deciding what to do.
+After successful creation, cleanup runs even when probing or telemetry raises an
+exception or the CLI receives KeyboardInterrupt. No completed verdict is emitted
+until deletion is confirmed. A cleanup timeout is an execution failure, not a pass.
+Reports from completed runs include `cleanup.confirmed: true` in JSON evidence.
+
+This does not implement a dashboard Cancel button or a crash-recovery controller.
+If creation returns an ambiguous transport error, or the process/machine stops
+abruptly, inspect the named resource in the pinned local context. Do not blindly
+repeat injection while its state is uncertain. Deleting a Pod Kill resource does
+not undo pod termination; Kubernetes workload recovery is checked separately.

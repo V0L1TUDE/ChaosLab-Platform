@@ -250,24 +250,26 @@ def generate_chaos_manifest(config: Dict[str, Any]) -> Tuple[str, str, Dict[str,
     return clean_name, crd_type, manifest
 
 def apply_chaos(config: Dict[str, Any]) -> Tuple[bool, str, str, str]:
-    """Deploy Chaos Mesh manifest to Kubernetes, ensuring clean idempotency."""
+    """Create a fresh fault resource; never replace a pre-existing experiment."""
     clean_name, crd_type, manifest = generate_chaos_manifest(config)
     namespace = config.get("target", {}).get("namespace", "default")
-    # Delete preexisting chaos CRD if any to guarantee fresh fault injection
-    run_command(["kubectl", "delete", crd_type, clean_name, "-n", namespace, "--ignore-not-found=true", "--wait=false"])
     manifest_yaml = yaml.dump(manifest)
-    res = run_command(["kubectl", "apply", "-f", "-"], input_text=manifest_yaml)
+    res = run_command(["kubectl", "create", "-f", "-"], input_text=manifest_yaml)
     if res.returncode != 0:
         return False, clean_name, res.stderr.strip(), crd_type
     print(f"{crd_type.lower()}.chaos-mesh.org/{clean_name} created")
     return True, clean_name, res.stdout.strip(), crd_type
 
 def cleanup_chaos(clean_name: str, namespace: str, crd_type: str):
-    """Clean up applied Chaos Mesh custom resources to leave cluster clean."""
-    try:
-        run_command(["kubectl", "delete", crd_type, clean_name, "-n", namespace, "--ignore-not-found=true", "--wait=false"])
-    except Exception:
-        pass
+    """Confirm deletion within a bounded interval, or surface unresolved cleanup."""
+    result = run_command([
+        "kubectl", "delete", crd_type, clean_name, "-n", namespace,
+        "--ignore-not-found=true", "--wait=true", "--timeout=20s"
+    ], timeout=25)
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "kubectl failed"
+        raise RuntimeError(f"Fault cleanup unconfirmed for {crd_type}/{clean_name} in {namespace}: {detail}")
+    return True
 
 def get_pods(namespace: str, label_selector: str) -> List[Dict[str, Any]]:
     """Retrieve pods matching label selector in JSON format."""
@@ -423,163 +425,170 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
 
     # Inject Fault
     emit_progress("injecting", 25, f"Injecting chaos fault '{fault_type}' via Chaos Mesh into namespace '{namespace}'...")
-    chaos_success, chaos_name, chaos_msg, crd_type = apply_chaos(config)
-    fault_injected_dt = datetime.now(timezone.utc)
-    fault_injected_time = time.time()
-    fault_injected_us = int(fault_injected_time * 1_000_000)
+    chaos_success = False
+    try:
+        chaos_success, chaos_name, chaos_msg, crd_type = apply_chaos(config)
+        fault_injected_dt = datetime.now(timezone.utc)
+        fault_injected_time = time.time()
+        fault_injected_us = int(fault_injected_time * 1_000_000)
 
-    if not chaos_success:
-        print("FAIL: Chaos injection failed.")
-        emit_progress("failed", 100, f"Chaos injection failed: {chaos_msg}")
-        return False
+        if not chaos_success:
+            print("FAIL: Chaos injection failed.")
+            emit_progress("failed", 100, f"Chaos injection failed: {chaos_msg}")
+            return False
 
-    is_network_fault = "network" in fault_type.lower()
+        is_network_fault = "network" in fault_type.lower()
 
-    impacted_pod_names = []
-    original_pod_disappeared = False
-    original_pod_disappeared_dt = None
-    replacement_pod = None
-    replacement_ready = False
-    replacement_ready_dt = None
-    replacement_ready_us = None
-    recovery_time = None
-    total_recovery_time = None
+        impacted_pod_names = []
+        original_pod_disappeared = False
+        original_pod_disappeared_dt = None
+        replacement_pod = None
+        replacement_ready = False
+        replacement_ready_dt = None
+        replacement_ready_us = None
+        recovery_time = None
+        total_recovery_time = None
 
-    if not is_network_fault:
-        print()
-        print("Waiting for the target pod to disappear...")
-        emit_progress("waiting_impact", 40, f"Fault applied. Waiting for target pod '{baseline_pod['name']}' to terminate...")
+        if not is_network_fault:
+            print()
+            print("Waiting for the target pod to disappear...")
+            emit_progress("waiting_impact", 40, f"Fault applied. Waiting for target pod '{baseline_pod['name']}' to terminate...")
 
-        start = time.time()
-        while time.time() - start < timeout:
-            current_pods = get_pods(namespace, label_selector)
-            active_original_pods = [
-                p for p in current_pods
-                if p["name"] in initial_names and p["status"] != "Terminating"
-            ]
+            start = time.time()
+            while time.time() - start < timeout:
+                current_pods = get_pods(namespace, label_selector)
+                active_original_pods = [
+                    p for p in current_pods
+                    if p["name"] in initial_names and p["status"] != "Terminating"
+                ]
 
-            if len(active_original_pods) < len(initial_pods):
-                impacted_pod_names = sorted(initial_names - {p["name"] for p in active_original_pods})
-                original_pod_disappeared = True
-                original_pod_disappeared_dt = datetime.now(timezone.utc)
-                print(f"Target pod disappeared: {initial_names - {p['name'] for p in active_original_pods}}")
-                emit_progress("waiting_recovery", 60, f"Target pod terminated. Waiting for replacement pod to be Ready (timeout: {timeout}s)...")
+                if len(active_original_pods) < len(initial_pods):
+                    impacted_pod_names = sorted(initial_names - {p["name"] for p in active_original_pods})
+                    original_pod_disappeared = True
+                    original_pod_disappeared_dt = datetime.now(timezone.utc)
+                    print(f"Target pod disappeared: {initial_names - {p['name'] for p in active_original_pods}}")
+                    emit_progress("waiting_recovery", 60, f"Target pod terminated. Waiting for replacement pod to be Ready (timeout: {timeout}s)...")
 
-                recovery_start = time.time()
-                print(f"Waiting for replacement pod to satisfy expected ready replicas ({expected_replicas})...")
+                    recovery_start = time.time()
+                    print(f"Waiting for replacement pod to satisfy expected ready replicas ({expected_replicas})...")
 
-                while time.time() - recovery_start < timeout:
-                    ready_pods = get_ready_pods(namespace, label_selector)
-                    current_all = get_pods(namespace, label_selector)
-                    new_pods = [p for p in current_all if p["name"] not in initial_names]
-                    if new_pods:
-                        replacement_pod = new_pods[0]
+                    while time.time() - recovery_start < timeout:
+                        ready_pods = get_ready_pods(namespace, label_selector)
+                        current_all = get_pods(namespace, label_selector)
+                        new_pods = [p for p in current_all if p["name"] not in initial_names]
+                        if new_pods:
+                            replacement_pod = new_pods[0]
 
-                    if len(ready_pods) >= expected_replicas:
-                        ready_new = [p for p in ready_pods if p["name"] not in initial_names]
-                        replacement_pod = (ready_new or ready_pods)[0]
-                        replacement_ready = True
-                        replacement_ready_dt = datetime.now(timezone.utc)
-                        replacement_ready_time = time.time()
-                        replacement_ready_us = int(replacement_ready_time * 1_000_000)
+                        if len(ready_pods) >= expected_replicas:
+                            ready_new = [p for p in ready_pods if p["name"] not in initial_names]
+                            replacement_pod = (ready_new or ready_pods)[0]
+                            replacement_ready = True
+                            replacement_ready_dt = datetime.now(timezone.utc)
+                            replacement_ready_time = time.time()
+                            replacement_ready_us = int(replacement_ready_time * 1_000_000)
 
-                        recovery_time = replacement_ready_time - recovery_start
-                        total_recovery_time = replacement_ready_time - fault_injected_time
-                        break
+                            recovery_time = replacement_ready_time - recovery_start
+                            total_recovery_time = replacement_ready_time - fault_injected_time
+                            break
 
-                    time.sleep(1)
-                break
-            time.sleep(1)
-    else:
-        # Network chaos scenario: wait for injection duration, observe steady-state
-        emit_progress("waiting_impact", 50, f"Network chaos active. Observing service under latency/loss...")
-        time.sleep(5)
-        replacement_pod = baseline_pod
-        replacement_ready = True
-        recovery_time = 0.5
-        total_recovery_time = 5.0
-        replacement_ready_dt = datetime.now(timezone.utc)
-        replacement_ready_us = int(time.time() * 1_000_000)
+                        time.sleep(1)
+                    break
+                time.sleep(1)
+        else:
+            # Network chaos scenario: wait for injection duration, observe steady-state
+            emit_progress("waiting_impact", 50, f"Network chaos active. Observing service under latency/loss...")
+            time.sleep(5)
+            replacement_pod = baseline_pod
+            replacement_ready = True
+            recovery_time = 0.5
+            total_recovery_time = 5.0
+            replacement_ready_dt = datetime.now(timezone.utc)
+            replacement_ready_us = int(time.time() * 1_000_000)
 
-    # Allow cluster state to synchronize
-    time.sleep(2)
+        # Allow cluster state to synchronize
+        time.sleep(2)
 
-    # Collect Evidence
-    tracked_names = set(initial_names)
-    if replacement_pod:
-        tracked_names.add(replacement_pod["name"])
+        # Collect Evidence
+        tracked_names = set(initial_names)
+        if replacement_pod:
+            tracked_names.add(replacement_pod["name"])
 
-    chaos_mesh_evidence = get_chaos_mesh_evidence(chaos_name, namespace, crd_type)
-    k8s_events = get_kubernetes_events(namespace, tracked_names, target_name)
-    current_ready_pods = get_ready_pods(namespace, label_selector)
+        chaos_mesh_evidence = get_chaos_mesh_evidence(chaos_name, namespace, crd_type)
+        k8s_events = get_kubernetes_events(namespace, tracked_names, target_name)
+        current_ready_pods = get_ready_pods(namespace, label_selector)
 
-    # Perform Deep Application Probing
-    app_evidence = {"enabled": False}
-    target_probe_pod = replacement_pod or baseline_pod
-    if target_probe_pod and (replacement_ready or is_network_fault):
-        print()
-        print("Probing application correctness on target pod...")
-        emit_progress("probing_app", 75, f"Target pod '{target_probe_pod['name']}' Ready. Probing application correctness...")
-        app_evidence = probe_application(target_probe_pod["name"], namespace, config)
-        if app_evidence.get("enabled"):
-            print(f"- Health Status: {app_evidence.get('health_status', 'N/A')}")
-            if app_evidence.get("transaction_id"):
-                print(f"- Functional Confirmation ID: {app_evidence.get('transaction_id')}")
-            print(f"- Container Startup Logs: {'Verified' if app_evidence.get('startup_log_detected') else 'Missing'}")
+        # Perform Deep Application Probing
+        app_evidence = {"enabled": False}
+        target_probe_pod = replacement_pod or baseline_pod
+        if target_probe_pod and (replacement_ready or is_network_fault):
+            print()
+            print("Probing application correctness on target pod...")
+            emit_progress("probing_app", 75, f"Target pod '{target_probe_pod['name']}' Ready. Probing application correctness...")
+            app_evidence = probe_application(target_probe_pod["name"], namespace, config)
+            if app_evidence.get("enabled"):
+                print(f"- Health Status: {app_evidence.get('health_status', 'N/A')}")
+                if app_evidence.get("transaction_id"):
+                    print(f"- Functional Confirmation ID: {app_evidence.get('transaction_id')}")
+                print(f"- Container Startup Logs: {'Verified' if app_evidence.get('startup_log_detected') else 'Missing'}")
 
-    # Collect Distributed Tracing Telemetry
-    telemetry_config = config.get("telemetry") or config.get("verification", {}).get("telemetry", {})
-    telemetry_evidence = {"enabled": False}
-    if telemetry_config.get("enabled", False):
-        print()
-        print("Collecting distributed tracing telemetry from Jaeger...")
-        emit_progress("telemetry", 85, "Collecting OpenTelemetry traces & analyzing latency distribution...")
-        telemetry_service = telemetry_config.get("service_name") or target_name
-        jaeger_url = telemetry_config.get("query_endpoint", "http://localhost:16686")
-        time.sleep(3)
+        # Collect Distributed Tracing Telemetry
+        telemetry_config = config.get("telemetry") or config.get("verification", {}).get("telemetry", {})
+        telemetry_evidence = {"enabled": False}
+        if telemetry_config.get("enabled", False):
+            print()
+            print("Collecting distributed tracing telemetry from Jaeger...")
+            emit_progress("telemetry", 85, "Collecting OpenTelemetry traces & analyzing latency distribution...")
+            telemetry_service = telemetry_config.get("service_name") or target_name
+            jaeger_url = telemetry_config.get("query_endpoint", "http://localhost:16686")
+            time.sleep(3)
 
-        end_time_us = int(time.time() * 1_000_000)
-        client = TelemetryClient(base_url=jaeger_url, namespace="default")
+            end_time_us = int(time.time() * 1_000_000)
+            client = TelemetryClient(base_url=jaeger_url, namespace="default")
 
-        post_rec_start = replacement_ready_us if replacement_ready_us else (end_time_us - 10_000_000)
-        post_recovery_tel = client.get_service_telemetry(
-            telemetry_service,
-            start_time_us=post_rec_start,
-            end_time_us=end_time_us + 2_000_000,
-            limit=50
-        )
-
-        if post_recovery_tel.get("traces_count", 0) == 0:
+            post_rec_start = replacement_ready_us if replacement_ready_us else (end_time_us - 10_000_000)
             post_recovery_tel = client.get_service_telemetry(
                 telemetry_service,
-                start_time_us=end_time_us - 15_000_000,
+                start_time_us=post_rec_start,
                 end_time_us=end_time_us + 2_000_000,
                 limit=50
             )
 
-        fault_tel = client.get_service_telemetry(
-            telemetry_service,
-            start_time_us=fault_injected_us,
-            end_time_us=post_rec_start,
-            limit=50
-        )
+            if post_recovery_tel.get("traces_count", 0) == 0:
+                post_recovery_tel = client.get_service_telemetry(
+                    telemetry_service,
+                    start_time_us=end_time_us - 15_000_000,
+                    end_time_us=end_time_us + 2_000_000,
+                    limit=50
+                )
 
-        telemetry_evidence = post_recovery_tel
-        telemetry_evidence["fault_window_errors"] = fault_tel.get("error_spans_count", 0)
-        telemetry_evidence["error_spans_count"] = fault_tel.get("error_spans_count", 0) + post_recovery_tel.get("error_spans_count", 0)
+            fault_tel = client.get_service_telemetry(
+                telemetry_service,
+                start_time_us=fault_injected_us,
+                end_time_us=post_rec_start,
+                limit=50
+            )
 
-        if telemetry_evidence.get("available") and telemetry_evidence.get("traces_count", 0) > 0:
-            lat = telemetry_evidence.get("latency_ms", {})
-            print(f"- Post-Recovery Traces: {telemetry_evidence['traces_count']} ({telemetry_evidence['spans_count']} spans)")
-            print(f"- p50 / p95 Latency: {lat.get('p50')}ms / {lat.get('p95')}ms (max: {lat.get('max')}ms)")
-            print(f"- Error Spans (Fault Window): {telemetry_evidence.get('fault_window_errors', 0)}")
-            if telemetry_evidence.get("sample_trace_ids"):
-                print(f"- Sample Trace ID: {telemetry_evidence['sample_trace_ids'][0]}")
-        else:
-            print(f"- Distributed Tracing: No traces recorded for '{telemetry_service}' in post-recovery window.")
+            telemetry_evidence = post_recovery_tel
+            telemetry_evidence["fault_window_errors"] = fault_tel.get("error_spans_count", 0)
+            telemetry_evidence["error_spans_count"] = fault_tel.get("error_spans_count", 0) + post_recovery_tel.get("error_spans_count", 0)
 
-    experiment_end_dt = datetime.now(timezone.utc)
-    cleanup_chaos(chaos_name, namespace, crd_type)
+            if telemetry_evidence.get("available") and telemetry_evidence.get("traces_count", 0) > 0:
+                lat = telemetry_evidence.get("latency_ms", {})
+                print(f"- Post-Recovery Traces: {telemetry_evidence['traces_count']} ({telemetry_evidence['spans_count']} spans)")
+                print(f"- p50 / p95 Latency: {lat.get('p50')}ms / {lat.get('p95')}ms (max: {lat.get('max')}ms)")
+                print(f"- Error Spans (Fault Window): {telemetry_evidence.get('fault_window_errors', 0)}")
+                if telemetry_evidence.get("sample_trace_ids"):
+                    print(f"- Sample Trace ID: {telemetry_evidence['sample_trace_ids'][0]}")
+            else:
+                print(f"- Distributed Tracing: No traces recorded for '{telemetry_service}' in post-recovery window.")
+
+        experiment_end_dt = datetime.now(timezone.utc)
+
+    finally:
+        # Also runs for probe/telemetry errors and KeyboardInterrupt. Do not emit
+        # completion or write a passing report until deletion has been confirmed.
+        if chaos_success:
+            cleanup_chaos(chaos_name, namespace, crd_type)
 
     # Build Structured Evidence Dictionary
     evidence = {
@@ -606,6 +615,7 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
         "original_pod": impacted_pod_names[0] if impacted_pod_names else baseline_pod["name"],
         "impacted_pods": impacted_pod_names,
         "fault_injected": chaos_success,
+        "cleanup": {"confirmed": True, "resource": chaos_name, "namespace": namespace},
         "original_pod_disappeared": original_pod_disappeared,
         "replacement_pod": replacement_pod["name"] if replacement_pod else None,
         "replacement_ready": replacement_ready,
