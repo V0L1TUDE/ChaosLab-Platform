@@ -9,6 +9,7 @@ pluggable health/functional probing, distributed trace collection, and Oracle in
 from datetime import datetime, timezone
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -43,6 +44,73 @@ def run_command(command: List[str], input_text: Optional[str] = None, timeout: i
         return subprocess.CompletedProcess(command, returncode=124, stdout="", stderr=f"Command timed out after {timeout}s")
     except Exception as e:
         return subprocess.CompletedProcess(command, returncode=1, stdout="", stderr=str(e))
+
+# Model A beta safety policy: narrow scope for local and hosted experiment execution.
+# Future approval / agent RBAC checks are separate defenses, not replacements.
+PROTECTED_NAMESPACES = {
+    "kube-system", "kube-public", "kube-node-lease",
+    "chaos-mesh", "chaoslab-system", "cert-manager",
+}
+SUPPORTED_FAULT_TYPES = {
+    "pod-kill", "pod-failure", "container-kill",
+    "network-delay", "network-loss", "network-corrupt",
+}
+
+
+def validate_experiment_config(config: Dict[str, Any]) -> None:
+    """Reject unsafe experiment configuration *before* any kubectl activity."""
+    if not isinstance(config, dict):
+        raise ValueError("Experiment configuration must be a dictionary")
+
+    target = config.get("target")
+    if not isinstance(target, dict):
+        raise ValueError("Experiment target must be a dictionary")
+
+    namespace = target.get("namespace", "default")
+    if not isinstance(namespace, str) or not namespace.strip():
+        raise ValueError("Target namespace must be a non-empty string")
+    if namespace in PROTECTED_NAMESPACES or namespace.startswith("kube-"):
+        raise ValueError(f"Protected Kubernetes namespace is not a valid target: {namespace}")
+
+    labels = target.get("label")
+    if (not isinstance(labels, dict) or not labels or
+            any(not isinstance(key, str) or not key.strip() or
+                not isinstance(value, str) or not value.strip()
+                for key, value in labels.items())):
+        raise ValueError("Target must include at least one non-empty label selector")
+
+    fault = config.get("fault", {})
+    if not isinstance(fault, dict):
+        raise ValueError("Fault configuration must be a dictionary")
+    fault_type = fault.get("type", "pod-kill")
+    if fault_type not in SUPPORTED_FAULT_TYPES:
+        raise ValueError(f"Unsupported fault type: {fault_type!r}")
+    if fault.get("mode", "one") != "one":
+        raise ValueError("Beta safety policy permits only fault mode 'one'")
+
+    # Bound the disruption duration even if an experiment comes from an API.
+    if "duration" in fault:
+        duration = fault["duration"]
+        match = re.fullmatch(r"([1-9][0-9]*)(s|m)", duration) if isinstance(duration, str) else None
+        if not match:
+            raise ValueError("Fault duration must be like '15s' or '2m'")
+        seconds = int(match.group(1)) * (60 if match.group(2) == "m" else 1)
+        if seconds > 300:
+            raise ValueError("Fault duration must not exceed 300 seconds")
+
+    recovery = config.get("recovery", {})
+    verification = config.get("verification", {})
+    if not isinstance(recovery, dict) or not isinstance(verification, dict):
+        raise ValueError("Recovery and verification must be dictionaries")
+
+    timeout = recovery.get("timeout_seconds", 60)
+    if type(timeout) is not int or not 1 <= timeout <= 300:
+        raise ValueError("Recovery timeout must be an integer between 1 and 300 seconds")
+
+    replicas = recovery.get("expected_ready_replicas", verification.get("expected_ready_replicas", 1))
+    if type(replicas) is not int or not 1 <= replicas <= 100:
+        raise ValueError("Expected ready replicas must be an integer between 1 and 100")
+
 
 def load_experiment_config(config_path: str) -> Dict[str, Any]:
     """
@@ -98,6 +166,7 @@ def load_experiment_config(config_path: str) -> Dict[str, Any]:
     else:
         config.setdefault("telemetry", {"enabled": False})
 
+    validate_experiment_config(config)
     return config
 
 def get_label_selector(label_dict: Dict[str, str]) -> str:
@@ -122,6 +191,7 @@ def get_target_app_group(config: Dict[str, Any]) -> str:
 
 def generate_chaos_manifest(config: Dict[str, Any]) -> Tuple[str, str, Dict[str, Any]]:
     """Generate Chaos Mesh manifest dynamically from declarative configuration."""
+    validate_experiment_config(config)
     name = config.get("name", "experiment")
     clean_name = f"chaoslab-{name.lower().replace('_', '-')}"
     namespace = config.get("target", {}).get("namespace", "default")
@@ -141,7 +211,7 @@ def generate_chaos_manifest(config: Dict[str, Any]) -> Tuple[str, str, Dict[str,
                 "labelSelectors": label_dict
             }
         }
-        if action in ["pod-failure", "container-kill"] and "duration" in fault:
+        if action in ["pod-failure", "container-kill"]:
             spec["duration"] = duration
     elif action in ["network-delay", "network-loss", "network-corrupt"]:
         crd_type = "NetworkChaos"
@@ -165,16 +235,8 @@ def generate_chaos_manifest(config: Dict[str, Any]) -> Tuple[str, str, Dict[str,
         elif net_action == "corrupt":
             spec["corrupt"] = {"corrupt": fault.get("corrupt_pct", "50")}
     else:
-        # Default fallback
-        crd_type = "PodChaos"
-        spec = {
-            "action": "pod-kill",
-            "mode": mode,
-            "selector": {
-                "namespaces": [namespace],
-                "labelSelectors": label_dict
-            }
-        }
+        # Never substitute pod-kill for a misspelled / unsupported fault.
+        raise ValueError(f"Unsupported fault type: {action!r}")
 
     manifest = {
         "apiVersion": "chaos-mesh.org/v1alpha1",
@@ -306,6 +368,8 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
     Universal ChaosLab Experiment Orchestration Lifecycle:
     Baseline -> Inject -> Observe -> Verify -> Collect Telemetry -> Oracle -> Report.
     """
+    validate_experiment_config(config)
+
     def emit_progress(phase: str, percent: int, message: str, data: dict = None):
         if progress_callback:
             try:
