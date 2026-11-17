@@ -174,6 +174,8 @@ class Handler(BaseHTTPRequestHandler):
 
             if method == "GET" and (path == "/" or path.startswith("/static/")):
                 return self._send(self._static(path))
+            if method == "GET" and path == "/favicon.ico":       # browsers/tools that ignore the <link rel=icon>
+                return self._send(self._static("/static/favicon.svg"))
             if method == "GET" and not path.startswith("/api/"):
                 return self._send(self._static("/"))  # SPA fallback
 
