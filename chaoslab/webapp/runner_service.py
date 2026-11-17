@@ -50,7 +50,7 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
     if mode not in _USER_MODES:
         raise ExperimentRejected("mode must be 'live' or 'simulated'.")
     cluster_id = app.get("cluster_id")
-    shared_guest = (config.SHARED_APP_ID > 0 and app_row["id"] == config.SHARED_APP_ID
+    shared_guest = (app_row["id"] in config.SHARED_APP_IDS
                     and app_row["user_id"] is not None and app_row["user_id"] != user["id"])
     try:
         duration = catalog.validate_selection(app, service, fault_id, duration)
@@ -86,8 +86,9 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
             if shared_guest:
                 since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(timespec="seconds")
                 recent = conn.execute(
-                    "SELECT COUNT(*) FROM experiments WHERE user_id = ? AND application_id = ? AND mode = 'live' "
-                    "AND created_at >= ?", (user["id"], app_row["id"], since)).fetchone()[0]
+                    "SELECT COUNT(*) FROM experiments WHERE user_id = ? AND instr(?, ',' || application_id || ',') > 0 "
+                    "AND mode = 'live' AND created_at >= ?",          # one budget across ALL shared demos
+                    (user["id"], "," + ",".join(map(str, config.SHARED_APP_IDS)) + ",", since)).fetchone()[0]
                 if recent >= config.SHARED_LIVE_RUNS_PER_HOUR:
                     raise ExperimentRejected(
                         f"Fair use: at most {config.SHARED_LIVE_RUNS_PER_HOUR} Live runs per hour on the shared demo. "
