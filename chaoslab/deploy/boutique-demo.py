@@ -6,7 +6,7 @@
 * everything goes into NAMESPACE (not `default`, where Jaeger runs), so the agent's rights never cover Jaeger;
 * no load generator (the agent's tracing check sends its own light traffic) and no LoadBalancer Service
   (k3s runs without ServiceLB, and the shop is not exposed publicly);
-* tracing on, to the shared OpenTelemetry collector in `default`;
+* tracing on, to the shared OpenTelemetry collector in `default`, each service under its own name;
 * small CPU requests: the defaults reserve ~1.3 cores, which would fill a 2-vCPU instance on their own.
   Limits are unchanged, so services can still burst.
 """
@@ -32,9 +32,12 @@ def adapt(docs, namespace):
             for c in d["spec"]["template"]["spec"].get("containers", []):
                 c.setdefault("resources", {}).setdefault("requests", {})["cpu"] = CPU_REQUEST
                 if c["name"] == "server":
-                    env = [e for e in c.get("env", []) if e["name"] not in ("ENABLE_TRACING", "COLLECTOR_SERVICE_ADDR")]
+                    names = ("ENABLE_TRACING", "COLLECTOR_SERVICE_ADDR", "OTEL_SERVICE_NAME")
+                    env = [e for e in c.get("env", []) if e["name"] not in names]
+                    # Without OTEL_SERVICE_NAME the Go services report as "unknown_service:server" in Jaeger.
                     c["env"] = env + [{"name": "ENABLE_TRACING", "value": "1"},
-                                      {"name": "COLLECTOR_SERVICE_ADDR", "value": COLLECTOR}]
+                                      {"name": "COLLECTOR_SERVICE_ADDR", "value": COLLECTOR},
+                                      {"name": "OTEL_SERVICE_NAME", "value": name}]
         out.append(d)
     return out
 
