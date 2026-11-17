@@ -299,3 +299,118 @@ class ServerTelemetryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Caller(http.server.BaseHTTPRequestHandler):
+    """task-service stand-in: only /tasks/test exists; /boom fails."""
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        code = 200 if self.path == "/tasks/test" else 500 if self.path == "/boom" else 404
+        self.send_response(code); self.end_headers(); self.wfile.write(b"x")
+
+
+def ready_kubectl(args, timeout=25):
+    return True, json.dumps({"items": [{"metadata": {"name": "task-abc", "creationTimestamp": "2026"},
+                                        "status": {"phase": "Running", "containerStatuses": [{"ready": True}]}}]})
+
+
+class TrafficPreflightTests(unittest.TestCase):
+    """Regression: a mistyped caller path (/task/test) answered 404, was counted as 'ok', and hid the fault."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.caller = serve(Caller)
+        cls.port = cls.caller.server_address[1]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.caller.shutdown()
+
+    def check(self, path, kubectl=ready_kubectl, fail=False):
+        return safe_telemetry.check_traffic("project-platform", {"service": "task-service", "port": 8003, "path": path},
+                                            kubectl, forward_to(self.port, fail=fail))
+
+    def test_correct_path_passes(self):
+        ok, detail = self.check("/tasks/test")
+        self.assertTrue(ok, detail)
+        self.assertIn("HTTP 200", detail)
+
+    def test_mistyped_path_is_caught_with_a_clear_message(self):
+        ok, detail = self.check("/task/test")
+        self.assertFalse(ok)
+        self.assertIn("HTTP 404", detail)
+        self.assertIn("mistyped", detail)
+
+    def test_server_error_unreachable_and_no_pod(self):
+        self.assertIn("HTTP 500", self.check("/boom")[1])
+        self.assertIn("could not reach caller", self.check("/tasks/test", fail=True)[1])
+        no_pods = lambda args, timeout=25: (True, json.dumps({"items": []}))
+        ok, detail = self.check("/tasks/test", kubectl=no_pods)
+        self.assertFalse(ok)
+        self.assertIn("no Ready pod", detail)
+
+    def test_4xx_during_the_fault_is_not_counted_as_ok(self):
+        d = safe_telemetry.TrafficDriver("ns", {"service": "task-service", "port": 8003, "path": "/task/test"}, ready_kubectl,
+                                         forward_factory=forward_to(self.port), interval=0.05)
+        d.start(); time.sleep(0.4); stats = d.stop()
+        self.assertGreater(stats["client_errors"], 0)
+        self.assertEqual(stats["ok"], 0)
+
+
+class TrafficPreflightExecutorTests(unittest.TestCase):
+    """End to end inside the agent executor: a bad caller stops the run before the engine (the fault) runs."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.caller = serve(Caller)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.caller.shutdown()
+
+    def setUp(self):
+        import types
+        import agent as agent_mod
+        import safe_probes
+        from test_probes import StubEngine
+        self.agent_mod, self.safe_probes = agent_mod, safe_probes
+        self.stub = StubEngine()
+        self.saved = (sys.modules.get("engine"), agent_mod.kubectl, safe_probes.PortForward)
+        sys.modules["engine"] = self.stub
+        agent_mod.kubectl = ready_kubectl
+        safe_probes.PortForward = forward_to(self.caller.server_address[1])
+        self.events = []
+        self.reporter = types.SimpleNamespace(cancelled=threading.Event(), event=lambda *a, **k: self.events.append(a),
+                                              sample=lambda p: None, flush=lambda: None)
+
+    def tearDown(self):
+        eng, self.agent_mod.kubectl, self.safe_probes.PortForward = self.saved
+        if eng is None:
+            sys.modules.pop("engine", None)
+        else:
+            sys.modules["engine"] = eng
+
+    def run_with(self, path):
+        cfg = {"name": "chaoslab-exp-1", "target": {"namespace": "project-platform", "label": {"app": "project-service"}},
+               "fault": {"type": "pod-kill", "mode": "one"}, "recovery": {"timeout_seconds": 30, "expected_ready_replicas": 1},
+               "telemetry": {"enabled": True, "service_name": "project-service", "verify_error_spike": True,
+                             "traffic": {"service": "task-service", "port": 8003, "path": path}}}
+        job = {"job_id": 1, "job_token": "clj_x", "engine_config": cfg, "max_runtime_seconds": 300}
+        clean, err = self.agent_mod.validate_job(job, self.agent_mod.Policy(["project-platform"]))
+        self.assertIsNone(err)
+        return self.agent_mod.engine_executor(job, clean, self.reporter, os.path.join(CHAOSLAB_DIR, "verifier"))
+
+    def test_wrong_caller_path_aborts_before_the_fault(self):
+        out = self.run_with("/task/test")
+        self.assertIn("Pre-flight traffic check failed, so NO fault was injected", out["error"])
+        self.assertIn("HTTP 404", out["error"])
+        self.assertEqual(self.stub.runs, 0)                                  # the engine (fault injection) never ran
+
+    def test_correct_caller_path_proceeds(self):
+        out = self.run_with("/tasks/test")
+        self.assertEqual(self.stub.runs, 1)
+        self.assertIn("report", out)
+        self.assertTrue(any("Pre-flight traffic check passed" in e[1] for e in self.events))

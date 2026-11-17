@@ -336,6 +336,12 @@ def engine_executor(job: Dict[str, Any], cfg: Dict[str, Any], reporter: Reporter
                              f"Health: {h}. " + (f"Functional: {f}. " if f and not pre_probe.get("functional_test_passed") else "")
                              + "Fix the probe settings or the application and try again."}
         reporter.event("baseline", f"Pre-flight probes passed (health {pre_probe['health_details'].get('latency_ms')} ms).", 8)
+    if tspec and tspec.get("traffic"):
+        ok, detail = safe_telemetry.check_traffic(ns_, tspec["traffic"], kubectl)
+        if not ok:
+            return {"error": f"Pre-flight traffic check failed, so NO fault was injected: {detail}. "
+                             "Fix the caller in Tracing checks and try again."}
+        reporter.event("baseline", f"Pre-flight traffic check passed ({detail}).", 9)
     work = tempfile.mkdtemp(prefix="chaoslab-agent-")
     cfg_path = os.path.join(work, "experiment.yaml")
     with open(cfg_path, "w", encoding="utf-8") as f:
@@ -402,7 +408,8 @@ def engine_executor(job: Dict[str, Any], cfg: Dict[str, Any], reporter: Reporter
             if tel.get("available"):
                 reporter.event("verification", f"Traces: {tel.get('traces_count')} after recovery (p95 {tel.get('latency_ms', {}).get('p95')} ms); "
                                f"{tel.get('error_spans_count')} error span(s) during the fault"
-                               + (f"; traffic sent {traffic_stats.get('sent', 0)} request(s), {traffic_stats.get('errors', 0)} failed" if traffic_stats else "")
+                               + (f"; traffic sent {traffic_stats.get('sent', 0)} request(s), {traffic_stats.get('errors', 0)} failed"
+                                  + (f", {traffic_stats['client_errors']} answered 4xx" if traffic_stats.get('client_errors') else "") if traffic_stats else "")
                                + ".", 96)
             else:
                 reporter.event("verification", f"Tracing not collected: {tel.get('collection_error')}", 96, "warn")

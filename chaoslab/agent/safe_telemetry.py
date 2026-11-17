@@ -80,7 +80,7 @@ class TrafficDriver:
         self.ns, self.traffic, self.kubectl = namespace, traffic, kubectl
         self.forward_factory = forward_factory or safe_probes.PortForward
         self.interval, self.max_seconds = interval, max_seconds
-        self.stats = {"sent": 0, "ok": 0, "errors": 0, "service": traffic["service"], "path": traffic["path"]}
+        self.stats = {"sent": 0, "ok": 0, "errors": 0, "client_errors": 0, "service": traffic["service"], "path": traffic["path"]}
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -111,11 +111,38 @@ class TrafficDriver:
                             self.stats["errors"] += 1
                             if "error" in r:
                                 break                       # forward broke (pod gone): re-resolve a pod
+                        elif r["status"] >= 400:
+                            self.stats["client_errors"] += 1   # e.g. 404: the path is wrong, not a fault effect
                         else:
                             self.stats["ok"] += 1
                         self._stop.wait(self.interval)
             except safe_probes.ProbeError:
                 self._stop.wait(self.interval)
+
+
+def check_traffic(namespace: str, traffic: Dict[str, Any], kubectl: Callable,
+                  forward_factory: Optional[Callable] = None) -> Tuple[bool, str]:
+    """
+    Pre-flight: one GET to the caller BEFORE any fault. A 4xx/5xx or an unreachable caller means the traffic could not
+    make the fault visible (e.g. a mistyped path returns 404 and never calls the target), so the run must not start.
+    """
+    factory = forward_factory or safe_probes.PortForward
+    where = f"{traffic['service']}:{traffic['port']}{traffic['path']}"
+    pods = safe_probes.ready_pods(namespace, traffic["service"], kubectl)
+    if not pods:
+        return False, f"no Ready pod of caller '{traffic['service']}' in namespace '{namespace}'"
+    try:
+        with factory(namespace, pods[0], traffic["port"]) as local_port:
+            r = safe_probes.http_get(local_port, traffic["path"], timeout=5)
+    except safe_probes.ProbeError as e:
+        return False, f"could not reach caller {where}: {e}"
+    if "error" in r:
+        return False, f"no HTTP response from caller {where} ({r['error'][:80]}); is it listening on port {traffic['port']}?"
+    if r["status"] == 404:
+        return False, f"caller {where} returned HTTP 404 (not found): the path is probably mistyped"
+    if r["status"] >= 400:
+        return False, f"caller {where} returned HTTP {r['status']} before the fault"
+    return True, f"caller {where} answered HTTP {r['status']}"
 
 
 # ---------------------------------------------------------------------------------------------- Jaeger queries
