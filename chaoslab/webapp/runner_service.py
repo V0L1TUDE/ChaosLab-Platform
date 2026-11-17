@@ -9,6 +9,7 @@ the only thing they share is the `ExecutionBackend` contract.
 import json
 import threading
 import traceback
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from . import catalog, config, db, reports
@@ -49,10 +50,14 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
     if mode not in _USER_MODES:
         raise ExperimentRejected("mode must be 'live' or 'simulated'.")
     cluster_id = app.get("cluster_id")
+    shared_guest = (config.SHARED_APP_ID > 0 and app_row["id"] == config.SHARED_APP_ID
+                    and app_row["user_id"] is not None and app_row["user_id"] != user["id"])
     try:
         duration = catalog.validate_selection(app, service, fault_id, duration)
     except ValueError as e:
         raise ExperimentRejected(str(e))
+    if shared_guest and duration > config.SHARED_MAX_DURATION_SECONDS:
+        raise ExperimentRejected(f"On the shared demo, faults last at most {config.SHARED_MAX_DURATION_SECONDS} seconds.")
 
     if mode == "live" and cluster_id:
         # Customer cluster: executed by that cluster's agent, never by this server's own kubectl.
@@ -75,7 +80,18 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
             busy = conn.execute("SELECT COUNT(*) FROM experiments WHERE cluster_id = ? AND status IN ('pending', 'running')",
                                 (cluster_id,)).fetchone()[0]
             if busy:
-                raise ExperimentRejected("Another experiment is already running on this cluster.", 409)
+                raise ExperimentRejected(
+                    "Someone is already running an experiment on the shared demo cluster. Try again in a minute."
+                    if shared_guest else "Another experiment is already running on this cluster.", 409)
+            if shared_guest:
+                since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(timespec="seconds")
+                recent = conn.execute(
+                    "SELECT COUNT(*) FROM experiments WHERE user_id = ? AND application_id = ? AND mode = 'live' "
+                    "AND created_at >= ?", (user["id"], app_row["id"], since)).fetchone()[0]
+                if recent >= config.SHARED_LIVE_RUNS_PER_HOUR:
+                    raise ExperimentRejected(
+                        f"Fair use: at most {config.SHARED_LIVE_RUNS_PER_HOUR} Live runs per hour on the shared demo. "
+                        "Try again later, use Simulated mode, or connect your own cluster.", 429)
         active = conn.execute(
             "SELECT COUNT(*) FROM experiments WHERE user_id = ? AND status IN ('pending', 'running')", (user["id"],)
         ).fetchone()[0]
@@ -114,7 +130,7 @@ def create_and_start(user: Dict[str, Any], app_row, service: Any, fault_id: Any,
 
     spec = {"experiment_id": exp_id, "user_id": user["id"], "service": service, "fault_id": fault_id,
             "duration": duration, "engine_config": engine_config,
-            "cluster_id": cluster_id if mode == "live" else None}
+            "cluster_id": cluster_id if mode == "live" else None, "shared_guest": shared_guest}
     threading.Thread(target=_worker, args=(spec, mode), daemon=True, name=f"experiment-{exp_id}").start()
     return exp_id
 

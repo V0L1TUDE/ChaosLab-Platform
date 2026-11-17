@@ -15,6 +15,7 @@ from .execution import ExecutionBackend, ExecutionError, ProgressSink, normalize
 from .live_backend import LiveBackend
 
 DATA_SOURCE_AGENT = "LIVE: collected by the ChaosLab agent running in your own Kubernetes cluster"
+DATA_SOURCE_SHARED = "LIVE: collected by the ChaosLab agent on the shared demo Kubernetes cluster"
 
 
 class AgentBackend(ExecutionBackend):
@@ -87,9 +88,11 @@ class AgentBackend(ExecutionBackend):
         stage_times.setdefault("oracle", db.utcnow())
         stage_times.setdefault("completed", db.utcnow())
         sink.event("oracle", "Server evaluated the agent's evidence with the Verification Oracle.", "info", 97)
+        shared = bool(spec.get("shared_guest"))
         result = LiveBackend.build_result(spec, stage_times, {**report, "oracle_evaluation": evaluation},
-                                          DATA_SOURCE_AGENT)
-        result["notes"] = [f"Evidence collected by the ChaosLab agent (job {job_id}) in your cluster and verified by the "
+                                          DATA_SOURCE_SHARED if shared else DATA_SOURCE_AGENT)
+        where = "on the shared demo cluster" if shared else "in your cluster"
+        result["notes"] = [f"Evidence collected by the ChaosLab agent (job {job_id}) {where} and verified by the "
                            "server-side Oracle."] + notes_extra + [n for n in result["notes"][1:]]
         sink.event("completed", f"Oracle verdict: {evaluation['verdict']}.", "info", 100)
         return result
