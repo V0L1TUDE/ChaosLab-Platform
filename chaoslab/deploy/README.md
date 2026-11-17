@@ -109,33 +109,38 @@ demo app, plus a connected agent:
 | Chaos Mesh | installed by k3s' Helm controller; 1 controller, no dashboard or DNS server |
 | Jaeger | trace storage + the `opentelemetrycollector` address the apps send to |
 | project-platform | user/project/task services + frontend, built from `independent-apps/` on the instance |
+| learning-platform | the LMS: student/course/enrollment services + frontend, built from `independent-apps/` on the instance |
+| online-boutique | Online Boutique from its public release images, adapted by `boutique-demo.py` (own namespace, tracing on, no load generator or public LoadBalancer, small CPU requests) |
 | ChaosLab agent | systemd service `chaoslab-agent`, Kubernetes service account limited by `agent-rbac.yaml`, tracing via `--jaeger default/jaeger:16686` |
 
-Memory: about 2-3 GB on top of the website, so an 8 GB instance is comfortable. Nothing new is exposed to the internet
+Memory: about 3-4 GB on top of the website with all three apps, so an 8 GB, 2-vCPU instance fits (about 5 GB stays
+free). The agent's allow-list is exactly these three namespaces, one Role each; it has no fault rights in `default`,
+where Jaeger runs. Nothing new is exposed to the internet
 (the Kubernetes API listens on 6443, which the security group does not open).
 
 ```bash
 cd ~/ChaosLab-Platform && git pull
 sudo ./chaoslab/deploy/demo-cluster.sh                       # 5-10 min: installs everything, agent waits
 ```
-Then on the website: **Clusters → Connect a cluster** (e.g. `ec2-demo`, namespace `project-platform`), copy only the
+Then on the website: **Clusters → Connect a cluster** (e.g. `ec2-demo`, namespaces
+`project-platform,learning-platform,online-boutique`), copy only the
 `cle_...` token from the command and run:
 ```bash
 sudo ./chaoslab/deploy/demo-cluster.sh --token cle_YOUR_TOKEN
 ```
-Register the application (namespace `project-platform`), add probes/tracing (same values as the laptop guide), and run
+Register one application per namespace, add probes/tracing (same values as the laptop guide), and run
 Live experiments any time. Agent logs: `sudo journalctl -u chaoslab-agent -f`. Cluster: `sudo k3s kubectl get pods -A`.
 ### Let every account use it (shared Live demo)
-By default only you see the demo application. To let **any** signed-in user run Live experiments on it, find its id
-(the number in the address bar, e.g. `#/apps/7`) and on the server:
+By default only you see the demo applications. To let **any** signed-in user run Live experiments on them, find their
+ids (the number in the address bar, e.g. `#/apps/7`) and on the server list them, comma separated:
 ```bash
-echo 'CHAOSLAB_SHARED_APP_ID=7' | sudo tee -a /etc/chaoslab/chaoslab.env && sudo systemctl restart chaoslab
+echo 'CHAOSLAB_SHARED_APP_ID=7,8,9' | sudo tee -a /etc/chaoslab/chaoslab.env && sudo systemctl restart chaoslab
 ```
 Other users then see it marked **SHARED DEMO** and can run experiments; their experiments and reports are private to
 them. They cannot change its probes/tracing, delete it, or see/stop the cluster (only you can, from your account).
 Fair use: one experiment at a time on the cluster, `CHAOSLAB_SHARED_LIVE_RUNS_PER_HOUR` (default 6) Live runs per user
-per hour, faults up to `CHAOSLAB_SHARED_MAX_DURATION_SECONDS` (default 60). While shared, the app cannot be deleted;
-remove the line and restart to stop sharing.
+per hour across all shared demos, faults up to `CHAOSLAB_SHARED_MAX_DURATION_SECONDS` (default 60). While shared, an app cannot be deleted;
+remove its id from the line and restart to stop sharing it.
 
 To update the agent after `git pull`, re-run `sudo ./chaoslab/deploy/demo-cluster.sh` (no token needed): it refreshes the
 agent's own code copy in `/opt/chaoslab-agent` and restarts it with its saved credential. The agent log lists the

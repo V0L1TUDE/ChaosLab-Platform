@@ -11,7 +11,7 @@ class SharedDemoTests(unittest.TestCase):
     def setUp(self):
         from webapp import config
         self.config = config
-        self.saved = (config.SHARED_APP_ID, config.SHARED_LIVE_RUNS_PER_HOUR, config.SHARED_MAX_DURATION_SECONDS)
+        self.saved = (config.SHARED_APP_IDS, config.SHARED_LIVE_RUNS_PER_HOUR, config.SHARED_MAX_DURATION_SECONDS)
         self.owner = Client()
         self.owner.register()
         self.agent = connect(self.owner, name="Demo")
@@ -20,11 +20,11 @@ class SharedDemoTests(unittest.TestCase):
         self.guest.register()
 
     def tearDown(self):
-        (self.config.SHARED_APP_ID, self.config.SHARED_LIVE_RUNS_PER_HOUR,
+        (self.config.SHARED_APP_IDS, self.config.SHARED_LIVE_RUNS_PER_HOUR,
          self.config.SHARED_MAX_DURATION_SECONDS) = self.saved
 
-    def share(self, app_id=None):
-        self.config.SHARED_APP_ID = app_id or self.app_id
+    def share(self, *app_ids):
+        self.config.SHARED_APP_IDS = app_ids or (self.app_id,)
 
     def guest_run(self, service="web"):
         status, data, _ = start_experiment(self.guest, self.app_id, service)
@@ -74,7 +74,7 @@ class SharedDemoTests(unittest.TestCase):
         self.assertEqual(self.owner.get(f"/api/applications/{self.app_id}")[0], 200)     # still there
         # even the owner cannot delete it while shared (it would cascade to guests' experiments)
         self.assertEqual(self.owner.delete(f"/api/applications/{self.app_id}")[0], 409)
-        self.config.SHARED_APP_ID = 0
+        self.config.SHARED_APP_IDS = ()
         self.assertEqual(self.owner.delete(f"/api/applications/{self.app_id}")[0], 200)
 
     def test_guest_live_run_is_real_and_private(self):
@@ -117,6 +117,18 @@ class SharedDemoTests(unittest.TestCase):
         # Simulated mode is not rate limited, and the owner is never limited
         self.assertEqual(start_experiment(self.guest, self.app_id, mode="simulated")[0], 201)
         self.assertEqual(start_experiment(self.owner, self.app_id, "api")[0], 201)
+
+    def test_several_shared_apps_share_one_fair_use_budget(self):
+        second = register_app(self.owner, self.agent, name="Shared LMS", namespace="other-ns")
+        self.share(self.app_id, second)
+        apps = {a["id"]: a for a in self.guest.get("/api/applications")[1]["applications"]}
+        self.assertTrue(apps[self.app_id]["is_shared"] and apps[second]["is_shared"])
+        self.assertFalse(apps[second]["can_manage"])
+        self.assertEqual(self.owner.delete(f"/api/applications/{second}")[0], 409)
+        self.config.SHARED_LIVE_RUNS_PER_HOUR = 1
+        wait_done(self.guest, self.guest_run())
+        status, data, _ = start_experiment(self.guest, second, "secret-thing")  # the hourly budget covers every shared demo
+        self.assertEqual(status, 429, data)
 
     def test_only_cluster_apps_can_be_shared(self):
         status, data, _ = self.owner.upload("/api/applications", {"name": "notes"}, "notes.txt", b"hello")

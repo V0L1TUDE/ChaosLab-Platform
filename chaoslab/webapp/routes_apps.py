@@ -7,14 +7,19 @@ from . import catalog, config, db, deployments, manifests, probe_spec, telemetry
 from .http_core import HttpError, json_response, router
 
 
-def shared_app_id() -> int:
-    """The operator's shared Live demo application id, or -1 when the feature is off."""
-    return config.SHARED_APP_ID if config.SHARED_APP_ID > 0 else -1
+def is_shared_id(app_id: int) -> bool:
+    """True when the operator listed this application id as a shared Live demo."""
+    return app_id in config.SHARED_APP_IDS
+
+
+def shared_ids_param() -> str:
+    """The shared ids as ',7,8,' for the SQL `instr` test below ('' when the feature is off)."""
+    return "," + ",".join(str(i) for i in config.SHARED_APP_IDS) + "," if config.SHARED_APP_IDS else ""
 
 
 def is_shared_guest(row, user_id: int) -> bool:
-    """True when `user_id` sees this app only because it is the shared demo (they do not own it)."""
-    return row["id"] == shared_app_id() and row["user_id"] is not None and row["user_id"] != user_id
+    """True when `user_id` sees this app only because it is a shared demo (they do not own it)."""
+    return is_shared_id(row["id"]) and row["user_id"] is not None and row["user_id"] != user_id
 
 
 def require_owner(row, user_id: int) -> None:
@@ -22,16 +27,17 @@ def require_owner(row, user_id: int) -> None:
         raise HttpError(403, "The shared demo application is managed by the site operator.")
 
 
-# Apps a user can see: their own, the built-in demos (if enabled), and the operator's shared demo (cluster apps only).
-VISIBLE_APPS_WHERE = "(a.user_id = ? OR (a.user_id IS NULL AND ?) OR (a.id = ? AND a.cluster_id IS NOT NULL))"
+# Apps a user can see: their own, the built-in demos (if enabled), and the operator's shared demos (cluster apps only).
+_SHARED_SQL = "instr(?, ',' || a.id || ',') > 0"
+VISIBLE_APPS_WHERE = f"(a.user_id = ? OR (a.user_id IS NULL AND ?) OR ({_SHARED_SQL} AND a.cluster_id IS NOT NULL))"
 
 
 def visible_apps(conn, uid: int):
     return conn.execute(
         "SELECT a.*, (SELECT COUNT(*) FROM experiments e WHERE e.application_id = a.id AND e.user_id = ?) AS n "
         f"FROM applications a WHERE {VISIBLE_APPS_WHERE} "
-        "ORDER BY (a.user_id IS NULL) DESC, (a.id = ?) DESC, CASE WHEN a.user_id IS NULL THEN a.id END ASC, a.id DESC",
-        (uid, uid, int(config.SHOW_DEMO_APPS), shared_app_id(), shared_app_id()),
+        f"ORDER BY (a.user_id IS NULL) DESC, ({_SHARED_SQL}) DESC, CASE WHEN a.user_id IS NULL THEN a.id END ASC, a.id DESC",
+        (uid, uid, int(config.SHOW_DEMO_APPS), shared_ids_param(), shared_ids_param()),
     ).fetchall()
 
 
@@ -51,7 +57,7 @@ def app_to_dict(row, experiments_count: int = 0, user_id: Optional[int] = None) 
         "executable": builtin or row["status"] in ("validated", "deployed") or bool(row["cluster_id"]),   # can run experiments
         "deployable": (not builtin) and row["status"] in ("validated", "deploy_failed"),
         "experiments_count": experiments_count,
-        "is_shared": row["id"] == shared_app_id() and bool(row["cluster_id"]),
+        "is_shared": is_shared_id(row["id"]) and bool(row["cluster_id"]),
         "can_manage": (not builtin) and not guest,
     }
     if guest:
@@ -78,7 +84,7 @@ def get_accessible_app(conn, user_id: int, app_id: int):
     """Own apps, built-in apps and the shared demo. Other users' apps look like 404 (no existence leak)."""
     row = conn.execute(
         f"SELECT a.* FROM applications a WHERE a.id = ? AND {VISIBLE_APPS_WHERE}",
-        (app_id, user_id, int(config.SHOW_DEMO_APPS), shared_app_id())
+        (app_id, user_id, int(config.SHOW_DEMO_APPS), shared_ids_param())
     ).fetchone()
     if not row:
         raise HttpError(404, "Application not found.")
@@ -200,9 +206,9 @@ def delete_application(req):
         if row["user_id"] is None:
             raise HttpError(403, "The built-in demo application cannot be deleted.")
         require_owner(row, uid)
-        if row["id"] == shared_app_id():
+        if is_shared_id(row["id"]):
             # Deleting would cascade to every other user's experiments and reports on the shared demo.
-            raise HttpError(409, "This application is the shared Live demo. Remove CHAOSLAB_SHARED_APP_ID on the server first.")
+            raise HttpError(409, "This application is the shared Live demo. Remove its id from CHAOSLAB_SHARED_APP_ID on the server first.")
         if row["status"] == "deploying":
             raise HttpError(409, "Deployment is still in progress. Try again in a moment.")
         if row["status"] in ("deployed", "deploy_failed") or row["namespace"]:
