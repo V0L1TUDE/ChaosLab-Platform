@@ -5,8 +5,8 @@
 #   sudo ./chaoslab/deploy/demo-cluster.sh --token cle_..  # also connect the agent (token from Clusters -> Connect)
 #
 # Installs: k3s (Traefik/ServiceLB disabled, so it never touches ports 80/443), Chaos Mesh (via k3s' built-in Helm
-# controller), Jaeger + the trace collector address, the project-platform demo apps (built locally from this repo),
-# and the ChaosLab agent as a systemd service running as a least-privilege Kubernetes service account.
+# controller), Jaeger + the trace collector address, three demo apps (project-platform and learning-platform built
+# locally from this repo, Online Boutique from its public release images), and the ChaosLab agent as a systemd service running as a least-privilege Kubernetes service account.
 # Safe to re-run (updates in place).
 #
 # Options
@@ -16,7 +16,7 @@ set -euo pipefail
 
 K3S_VERSION="v1.30.6+k3s1"
 CHAOS_MESH_VERSION="2.7.2"
-APP_NS="project-platform"
+TARGET_NAMESPACES=(project-platform learning-platform online-boutique)   # the agent's allow-list, nothing wider
 TRACING_NS="default"
 TOKEN="" SERVER=""
 while [[ $# -gt 0 ]]; do
@@ -32,6 +32,8 @@ done
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_SRC="$REPO_DIR/independent-apps/project-management"
+LMS_SRC="$REPO_DIR/independent-apps/learning-management"
+NS_LIST="$(IFS=,; echo "${TARGET_NAMESPACES[*]}")"
 AGENT_ETC=/etc/chaoslab-agent
 AGENT_STATE=/var/lib/chaoslab-agent
 AGENT_CODE=/opt/chaoslab-agent
@@ -88,29 +90,43 @@ $KUBECTL -n chaos-mesh rollout status deploy/chaos-controller-manager --timeout=
 $KUBECTL -n chaos-mesh rollout status ds/chaos-daemon --timeout=300s
 
 # ------------------------------------------------------------------------------------------------ demo app images
-step "Building the project-platform images on this host"
+step "Building the project-platform and learning-platform images on this host"
 command -v docker >/dev/null || { apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q docker.io; }
+python3 -c 'import yaml' 2>/dev/null || apt-get install -y -q python3-yaml >/dev/null
 for svc in user-service project-service task-service; do
   docker build -q -t "pulse-$svc:latest" "$APP_SRC/services/$svc" >/dev/null
 done
 docker build -q -t pulse-frontend:latest "$APP_SRC/frontend" >/dev/null
+for svc in student-service course-service enrollment-service; do
+  docker build -q -t "lms-$svc:latest" "$LMS_SRC/services/$svc" >/dev/null
+done
+docker build -q -t lms-frontend:latest "$LMS_SRC/frontend" >/dev/null
 docker save pulse-user-service:latest pulse-project-service:latest pulse-task-service:latest pulse-frontend:latest \
+  lms-student-service:latest lms-course-service:latest lms-enrollment-service:latest lms-frontend:latest \
   | /usr/local/bin/k3s ctr -n k8s.io images import - >/dev/null
-echo "images imported into k3s"
+echo "images imported into k3s (Online Boutique uses its public release images)"
 
 # ------------------------------------------------------------------------------------------------ tracing + apps
 step "Deploying Jaeger and the demo apps"
 $KUBECTL apply -f "$REPO_DIR/chaoslab/k8s/jaeger.yaml"
 $KUBECTL apply -f "$APP_SRC/k8s/namespace.yaml" -f "$APP_SRC/k8s/deployments.yaml"
+$KUBECTL apply -f "$LMS_SRC/k8s/namespace.yaml" -f "$LMS_SRC/k8s/deployments.yaml"
+$KUBECTL create namespace online-boutique --dry-run=client -o yaml | $KUBECTL apply -f -
+python3 "$REPO_DIR/chaoslab/deploy/boutique-demo.py" "$REPO_DIR/release/kubernetes-manifests.yaml" online-boutique \
+  | $KUBECTL apply -f -
 $KUBECTL -n "$TRACING_NS" rollout status deploy/jaeger --timeout=300s
-for d in user-service project-service task-service pm-frontend; do
-  $KUBECTL -n "$APP_NS" rollout restart "deploy/$d" >/dev/null 2>&1 || true   # pick up rebuilt images on re-runs
-  $KUBECTL -n "$APP_NS" rollout status "deploy/$d" --timeout=300s
+for ns in project-platform learning-platform; do                  # locally built images: pick them up on re-runs
+  for d in $($KUBECTL -n "$ns" get deploy -o name); do $KUBECTL -n "$ns" rollout restart "$d" >/dev/null; done
+done
+for ns in "${TARGET_NAMESPACES[@]}"; do
+  for d in $($KUBECTL -n "$ns" get deploy -o name); do $KUBECTL -n "$ns" rollout status "$d" --timeout=420s; done
 done
 
 # ------------------------------------------------------------------------------------------------ agent identity (least privilege)
 step "Creating the agent's restricted service account"
-sed -e "s/TARGET_NAMESPACE/$APP_NS/g" -e "s/TRACING_NAMESPACE/$TRACING_NS/g" "$REPO_DIR/chaoslab/agent/agent-rbac.yaml" | $KUBECTL apply -f -
+for ns in "${TARGET_NAMESPACES[@]}"; do                           # one Role + RoleBinding per namespace
+  sed -e "s/TARGET_NAMESPACE/$ns/g" -e "s/TRACING_NAMESPACE/$TRACING_NS/g" "$REPO_DIR/chaoslab/agent/agent-rbac.yaml" | $KUBECTL apply -f -
+done
 $KUBECTL apply -f - <<EOF
 apiVersion: v1
 kind: Secret
@@ -149,9 +165,12 @@ current-context: demo
 EOF
 chown -R chaoslab-agent:chaoslab-agent "$AGENT_ETC" "$AGENT_STATE"
 chmod 700 "$AGENT_STATE" && chmod 600 "$AGENT_ETC/kubeconfig"
-sudo -u chaoslab-agent env KUBECONFIG="$AGENT_ETC/kubeconfig" /usr/local/bin/kubectl auth can-i create podchaos.chaos-mesh.org -n "$APP_NS" | grep -q yes \
-  || { echo "agent identity check failed" >&2; exit 1; }
-echo "agent can run faults in $APP_NS only (verified)"
+can_i() { sudo -u chaoslab-agent env KUBECONFIG="$AGENT_ETC/kubeconfig" /usr/local/bin/kubectl auth can-i "$@" 2>/dev/null || true; }
+for ns in "${TARGET_NAMESPACES[@]}"; do
+  [[ "$(can_i create podchaos.chaos-mesh.org -n "$ns")" == yes ]] || { echo "agent identity check failed for $ns" >&2; exit 1; }
+done
+[[ "$(can_i create podchaos.chaos-mesh.org -n "$TRACING_NS")" == no ]] || { echo "agent must not have fault rights in $TRACING_NS" >&2; exit 1; }
+echo "agent can run faults in $NS_LIST only (verified)"
 
 # ------------------------------------------------------------------------------------------------ agent code + service
 # The agent has its own code copy (agent + verifier only), refreshed on EVERY run so `git pull` + re-run updates it.
@@ -165,7 +184,7 @@ chown -R root:root "$AGENT_CODE" && chmod -R go-w "$AGENT_CODE"
 echo "agent code: $AGENT_CODE ($(grep -m1 '^VERSION' "$AGENT_CODE/agent/agent.py"))"
 {
   echo "CHAOSLAB_SERVER=$SERVER"
-  echo "CHAOSLAB_ALLOWED_NAMESPACES=$APP_NS"
+  echo "CHAOSLAB_ALLOWED_NAMESPACES=$NS_LIST"
   echo "CHAOSLAB_JAEGER=$TRACING_NS/jaeger:16686"
   echo "CHAOSLAB_STATE_DIR=$AGENT_STATE"
   echo "KUBECONFIG=$AGENT_ETC/kubeconfig"
@@ -192,12 +211,12 @@ elif [[ -f "$AGENT_STATE/agent.json" ]]; then
 fi
 
 step "Done"
-$KUBECTL get pods -n "$APP_NS" -o wide | awk '{print $1, $2, $3}'
+for ns in "${TARGET_NAMESPACES[@]}"; do echo "-- $ns"; $KUBECTL get pods -n "$ns" --no-headers | awk '{print "  ", $1, $2, $3}'; done
 free -h | awk 'NR<=2'
 if [[ ! -f "$AGENT_STATE/agent.json" ]]; then
   cat <<EOF
 
-Next: on the website go to Clusters -> Connect a cluster, name it (e.g. ec2-demo), set namespaces to $APP_NS,
+Next: on the website go to Clusters -> Connect a cluster, name it (e.g. ec2-demo), set namespaces to $NS_LIST,
 copy ONLY the token (cle_...) from the command, then run:
   sudo ./chaoslab/deploy/demo-cluster.sh --token cle_YOUR_TOKEN
 EOF
