@@ -1,8 +1,8 @@
 """
 Declarative verification probes for applications in connected clusters (server side)
 ===================================================================================
-The user describes WHAT to check (never how): an HTTP GET health check (mandatory), an optional functional GET
-check, and optional log substring checks. The server validates the spec with the same strict whitelist the agent
+The user describes WHAT to check (never how): a health check (mandatory: HTTP GET, or the standard gRPC health
+check for gRPC-only services), an optional functional GET check, and optional log substring checks. The server validates the spec with the same strict whitelist the agent
 enforces locally (see chaoslab/agent/safe_probes.py; a parity test keeps the two in sync). The agent executes the
 probes without any code execution: GET through a local port-forward, `kubectl logs`, substring matching.
 """
@@ -14,6 +14,7 @@ PATH_RE = re.compile(r"^/[A-Za-z0-9._~/%:@+=&?,-]{0,199}$")
 MAX_TEXT = 100
 MAX_PROHIBITED = 10
 PRINTABLE = re.compile(r"^[^\x00-\x1f\x7f]*$")
+GRPC_SERVICE_RE = re.compile(r"^[A-Za-z0-9_.]{1,100}$")
 
 
 def _int(v: Any, lo: int, hi: int) -> bool:
@@ -46,6 +47,28 @@ def _http(spec: Any, where: str) -> Tuple[Optional[Dict[str, Any]], Optional[str
     return clean, None
 
 
+def _health(spec: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """HTTP GET (default) or {"type": "grpc", "port": N[, "service": NAME]}: the standard grpc.health.v1 check,
+    which the agent sends through the same port-forward (no exec)."""
+    if isinstance(spec, dict) and spec.get("type") == "grpc":
+        extra = set(spec) - {"type", "port", "service"}
+        if extra:
+            return None, f"health: unsupported field(s) for a gRPC check: {', '.join(sorted(extra))}"
+        if not _int(spec.get("port"), 1, 65535):
+            return None, "health.port: must be 1-65535"
+        clean: Dict[str, Any] = {"type": "grpc", "port": spec["port"]}
+        if spec.get("service") not in (None, ""):
+            if not isinstance(spec["service"], str) or not GRPC_SERVICE_RE.match(spec["service"]):
+                return None, "health.service: a gRPC service name (letters, digits, '.', '_'; up to 100)"
+            clean["service"] = spec["service"]
+        return clean, None
+    if isinstance(spec, dict) and "type" in spec:
+        if spec["type"] != "http":
+            return None, "health.type: must be 'http' or 'grpc'"
+        spec = {k: v for k, v in spec.items() if k != "type"}
+    return _http(spec, "health")
+
+
 def validate(spec: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """-> (clean spec, None) or (None, reason). Health is mandatory; functional and logs are optional."""
     if not isinstance(spec, dict):
@@ -53,7 +76,7 @@ def validate(spec: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     extra = set(spec) - {"health", "functional", "logs"}
     if extra:
         return None, f"unsupported probe section(s): {', '.join(sorted(extra))}"
-    health, err = _http(spec.get("health"), "health")
+    health, err = _health(spec.get("health"))
     if err:
         return None, err
     clean: Dict[str, Any] = {"health": health}
@@ -84,11 +107,11 @@ def to_engine_application(probes: Dict[str, Any]) -> Dict[str, Any]:
     The `application` block of the job's engine config. The agent executes `probes`; the server's Oracle reads
     the remaining keys (the same schema the Oracle already uses) to decide which invariants apply.
     """
-    app: Dict[str, Any] = {
-        "enabled": True, "probes": probes,
-        "health_probe": {"type": "http", "port": probes["health"]["port"], "path": probes["health"]["path"],
-                         "expected_status": probes["health"]["expected_status"]},
-    }
+    h = probes["health"]
+    health_probe = ({"type": "grpc", "port": h["port"], **({"service": h["service"]} if "service" in h else {})}
+                    if h.get("type") == "grpc" else
+                    {"type": "http", "port": h["port"], "path": h["path"], "expected_status": h["expected_status"]})
+    app: Dict[str, Any] = {"enabled": True, "probes": probes, "health_probe": health_probe}
     if "functional" in probes:
         app["functional_check"] = {"enabled": True, "type": "http", **probes["functional"]}
     if "logs" in probes:

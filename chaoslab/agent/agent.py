@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 DNS_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 DURATION_RE = re.compile(r"^(\d{1,3})s$")
