@@ -125,6 +125,9 @@ sudo ./chaoslab/deploy/demo-cluster.sh --token cle_YOUR_TOKEN
 ```
 Register the application (namespace `project-platform`), add probes/tracing (same values as the laptop guide), and run
 Live experiments any time. Agent logs: `sudo journalctl -u chaoslab-agent -f`. Cluster: `sudo k3s kubectl get pods -A`.
+To update the agent after `git pull`, re-run `sudo ./chaoslab/deploy/demo-cluster.sh` (no token needed): it refreshes the
+agent's own code copy in `/opt/chaoslab-agent` and restarts it with its saved credential. The agent log lists the
+evidence each job collected; the Oracle verdict is computed by the server and shown on the website.
 
 ## Operating it
 | Task | Command (on the server) |

@@ -34,6 +34,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_SRC="$REPO_DIR/independent-apps/project-management"
 AGENT_ETC=/etc/chaoslab-agent
 AGENT_STATE=/var/lib/chaoslab-agent
+AGENT_CODE=/opt/chaoslab-agent
 KUBECTL="/usr/local/bin/k3s kubectl"
 step() { printf '\n==> %s\n' "$*"; }
 
@@ -153,10 +154,15 @@ sudo -u chaoslab-agent env KUBECONFIG="$AGENT_ETC/kubeconfig" /usr/local/bin/kub
 echo "agent can run faults in $APP_NS only (verified)"
 
 # ------------------------------------------------------------------------------------------------ agent code + service
-if [[ ! -f /opt/chaoslab/chaoslab/agent/agent.py ]]; then
-  apt-get install -y -q python3 python3-yaml rsync >/dev/null
-  mkdir -p /opt/chaoslab && rsync -a --delete --exclude '__pycache__' --exclude 'webapp/data' "$REPO_DIR/chaoslab/" /opt/chaoslab/chaoslab/
-fi
+# The agent has its own code copy (agent + verifier only), refreshed on EVERY run so `git pull` + re-run updates it.
+# It is independent of the website's /opt/chaoslab, which setup.sh manages.
+python3 -c 'import yaml' 2>/dev/null && command -v rsync >/dev/null || apt-get install -y -q python3 python3-yaml rsync >/dev/null
+mkdir -p "$AGENT_CODE"
+for d in agent verifier; do
+  rsync -a --delete --exclude '__pycache__' --exclude 'reports' "$REPO_DIR/chaoslab/$d/" "$AGENT_CODE/$d/"
+done
+chown -R root:root "$AGENT_CODE" && chmod -R go-w "$AGENT_CODE"
+echo "agent code: $AGENT_CODE ($(grep -m1 '^VERSION' "$AGENT_CODE/agent/agent.py"))"
 {
   echo "CHAOSLAB_SERVER=$SERVER"
   echo "CHAOSLAB_ALLOWED_NAMESPACES=$APP_NS"
@@ -182,7 +188,7 @@ if [[ -n "$TOKEN" ]]; then
     journalctl -u chaoslab-agent -n 15 --no-pager; echo "Enrollment failed (see above)." >&2; exit 1
   fi
 elif [[ -f "$AGENT_STATE/agent.json" ]]; then
-  systemctl enable chaoslab-agent >/dev/null 2>&1 && systemctl restart chaoslab-agent; echo "agent restarted with its saved credential"
+  systemctl enable chaoslab-agent >/dev/null 2>&1 && systemctl restart chaoslab-agent; echo "agent restarted with its saved credential (new code loaded)"
 fi
 
 step "Done"
