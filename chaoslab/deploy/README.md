@@ -99,6 +99,33 @@ certificate is issued.
 
 ---
 
+## Part 4 (optional): an always-on demo cluster, so Live demos don't need a laptop
+`demo-cluster.sh` turns the same instance (or a second one) into a small Kubernetes cluster with chaos tooling and the
+demo app, plus a connected agent:
+
+| Piece | Details |
+| --- | --- |
+| k3s | lightweight Kubernetes; its Traefik/ServiceLB are disabled so ports 80/443 stay with Caddy |
+| Chaos Mesh | installed by k3s' Helm controller; 1 controller, no dashboard or DNS server |
+| Jaeger | trace storage + the `opentelemetrycollector` address the apps send to |
+| project-platform | user/project/task services + frontend, built from `independent-apps/` on the instance |
+| ChaosLab agent | systemd service `chaoslab-agent`, Kubernetes service account limited by `agent-rbac.yaml`, tracing via `--jaeger default/jaeger:16686` |
+
+Memory: about 2-3 GB on top of the website, so an 8 GB instance is comfortable. Nothing new is exposed to the internet
+(the Kubernetes API listens on 6443, which the security group does not open).
+
+```bash
+cd ~/ChaosLab-Platform && git pull
+sudo ./chaoslab/deploy/demo-cluster.sh                       # 5-10 min: installs everything, agent waits
+```
+Then on the website: **Clusters → Connect a cluster** (e.g. `ec2-demo`, namespace `project-platform`), copy only the
+`cle_...` token from the command and run:
+```bash
+sudo ./chaoslab/deploy/demo-cluster.sh --token cle_YOUR_TOKEN
+```
+Register the application (namespace `project-platform`), add probes/tracing (same values as the laptop guide), and run
+Live experiments any time. Agent logs: `sudo journalctl -u chaoslab-agent -f`. Cluster: `sudo k3s kubectl get pods -A`.
+
 ## Operating it
 | Task | Command (on the server) |
 | --- | --- |

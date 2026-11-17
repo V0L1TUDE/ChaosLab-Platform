@@ -78,8 +78,10 @@ spec:
     dnsServer:
       create: false
 EOF
+# The chart's CRDs appear before its namespace and workloads: wait for the actual controller objects.
 for _ in $(seq 1 100); do
-  $KUBECTL get crd podchaos.chaos-mesh.org networkchaos.chaos-mesh.org >/dev/null 2>&1 && break; sleep 3
+  $KUBECTL get crd podchaos.chaos-mesh.org networkchaos.chaos-mesh.org >/dev/null 2>&1     && $KUBECTL -n chaos-mesh get deploy/chaos-controller-manager ds/chaos-daemon >/dev/null 2>&1 && break
+  sleep 3
 done
 $KUBECTL -n chaos-mesh rollout status deploy/chaos-controller-manager --timeout=300s
 $KUBECTL -n chaos-mesh rollout status ds/chaos-daemon --timeout=300s
