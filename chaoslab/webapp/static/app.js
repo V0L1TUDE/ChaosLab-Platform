@@ -304,8 +304,13 @@ function deploymentCard(a) {
 }
 
 
+function healthSummary(hc) {
+  return hc.type === 'grpc' ? `health gRPC :${hc.port}${hc.service ? ' ' + hc.service : ''} → SERVING`
+                            : `health GET :${hc.port}${hc.path} → ${hc.expected_status}`;
+}
+
 function probeSummary(p) {
-  const parts = [`health GET :${p.health.port}${p.health.path} → ${p.health.expected_status}`];
+  const parts = [healthSummary(p.health)];
   if (p.functional) parts.push(`functional GET :${p.functional.port}${p.functional.path} → ${p.functional.expected_status}`);
   if (p.logs) parts.push('log checks');
   return parts.join(' · ');
@@ -315,18 +320,28 @@ function probesCard(a) {
   const services = a.catalog.targetable_services;
   const configured = Object.entries(a.probes || {});
   return h`<div class="card"><div class="card-title"><h2>Verification probes</h2></div>
-    <div class="muted small" style="margin-bottom:10px">After each Live experiment the agent checks that your application really works, using <b>read-only HTTP GET requests</b> to the pod (through a temporary local port-forward) and optional log checks. Nothing is executed inside your containers. A health check is required; without probes these invariants show N/A. The probe runs once <b>before</b> the fault: if it already fails, no fault is injected.</div>
+    <div class="muted small" style="margin-bottom:10px">After each Live experiment the agent checks that your application really works, using <b>read-only HTTP GET requests</b> (or, for gRPC-only services, the standard <b>gRPC health check</b>) to the pod through a temporary local port-forward, and optional log checks. Nothing is executed inside your containers. A health check is required; without probes these invariants show N/A. The probe runs once <b>before</b> the fault: if it already fails, no fault is injected.</div>
     ${configured.length ? h`<div style="margin-bottom:12px">${configured.map(([svc, p]) => h`<div class="svc-row" style="padding:6px 0;border-bottom:1px solid #1d2a42"><div><span class="mono"><b>${svc}</b></span><div class="muted small">${probeSummary(p)}</div></div>
       <button class="btn danger sm" data-action="probes-remove" data-id="${a.id}" data-service="${svc}">Remove</button></div>`)}</div>` : ''}
     ${services.length ? h`<div id="probe-error"></div>
     <form data-form="probes" data-id="${a.id}" novalidate>
       <div class="field"><label>Service</label><select name="service">${services.map(s => h`<option value="${s}">${s}${a.probes && a.probes[s] ? ' (configured)' : ''}</option>`)}</select></div>
-      <div class="grid g3">
+      <div class="grid g2">
+        <div class="field"><label>Health check</label><select name="h_type">
+          <option value="http">HTTP GET</option><option value="grpc">gRPC health (grpc.health.v1)</option></select></div>
         <div class="field"><label>Health: port</label><input type="text" name="h_port" inputmode="numeric" placeholder="8080"></div>
-        <div class="field"><label>Health: path</label><input type="text" name="h_path" placeholder="/health"></div>
-        <div class="field"><label>Expected status</label><input type="text" name="h_status" inputmode="numeric" value="200"></div>
       </div>
-      <div class="field"><label>Health response must contain (optional)</label><input type="text" name="h_contains" maxlength="100"></div>
+      <div data-health="http">
+        <div class="grid g2">
+          <div class="field"><label>Health: path</label><input type="text" name="h_path" placeholder="/health"></div>
+          <div class="field"><label>Expected status</label><input type="text" name="h_status" inputmode="numeric" value="200"></div>
+        </div>
+        <div class="field"><label>Health response must contain (optional)</label><input type="text" name="h_contains" maxlength="100"></div>
+      </div>
+      <div data-health="grpc" hidden>
+        <div class="field"><label>gRPC service name (optional; empty = the whole server)</label><input type="text" name="h_service" maxlength="100" placeholder="hipstershop.PaymentService"></div>
+        <div class="muted small" style="margin-bottom:10px">Passes when the service answers <code>SERVING</code>. For services that only speak gRPC (no HTTP endpoint).</div>
+      </div>
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="f_enable"> Also run a functional check (GET)</label>
       <div class="grid g3" style="margin-top:8px">
         <div class="field"><label>Functional: port</label><input type="text" name="f_port" inputmode="numeric"></div>
@@ -346,8 +361,11 @@ function probesCard(a) {
 
 function fillProbeForm(form, svc) {
   const p = (S.probes || {})[svc], set = (n, v) => { form[n].value = v == null ? '' : v; };
-  set('h_port', p && p.health.port); set('h_path', p && p.health.path); set('h_status', p ? p.health.expected_status : 200);
-  set('h_contains', p && p.health.expected_body_contains);
+  const grpc = !!(p && p.health.type === 'grpc');
+  form.h_type.value = grpc ? 'grpc' : 'http'; showHealthFields(form);
+  set('h_port', p && p.health.port); set('h_path', p && !grpc && p.health.path);
+  set('h_status', p && !grpc ? p.health.expected_status : 200);
+  set('h_contains', p && p.health.expected_body_contains); set('h_service', p && p.health.service);
   form.f_enable.checked = !!(p && p.functional);
   set('f_port', p && p.functional && p.functional.port); set('f_path', p && p.functional && p.functional.path);
   set('f_status', p && p.functional ? p.functional.expected_status : 200); set('f_contains', p && p.functional && p.functional.expected_body_contains);
@@ -355,12 +373,22 @@ function fillProbeForm(form, svc) {
   set('l_expected', p && p.logs && p.logs.expected_log_pattern); set('l_prohibited', p && p.logs ? p.logs.prohibited_patterns.join(', ') : '');
 }
 
+function showHealthFields(form) {
+  form.querySelectorAll('[data-health]').forEach(el => { el.hidden = el.dataset.health !== form.h_type.value; });
+}
+
 async function saveProbes(form) {
   const box = document.getElementById('probe-error'); box.innerHTML = '';
   const fail = m => { box.innerHTML = h`<div class="banner err">${m}</div>`.s; };
   const num = v => (/^\d+$/.test(String(v).trim()) ? +v : NaN);
-  const health = {port: num(form.h_port.value), path: form.h_path.value.trim(), expected_status: num(form.h_status.value)};
-  if (form.h_contains.value.trim()) health.expected_body_contains = form.h_contains.value.trim();
+  let health;
+  if (form.h_type.value === 'grpc') {
+    health = {type: 'grpc', port: num(form.h_port.value)};
+    if (form.h_service.value.trim()) health.service = form.h_service.value.trim();
+  } else {
+    health = {port: num(form.h_port.value), path: form.h_path.value.trim(), expected_status: num(form.h_status.value)};
+    if (form.h_contains.value.trim()) health.expected_body_contains = form.h_contains.value.trim();
+  }
   const probes = {health};
   if (form.f_enable.checked) {
     probes.functional = {port: num(form.f_port.value), path: form.f_path.value.trim(), expected_status: num(form.f_status.value)};
@@ -440,7 +468,7 @@ async function saveTracing(form) {
 function verifiedSummaryCard(a) {
   const probes = Object.entries(a.probes || {});
   const tracing = Object.entries(a.telemetry || {});
-  const pLine = p => [p.health && `health GET :${p.health.port}${p.health.path}`, p.functional && `functional GET :${p.functional.port}${p.functional.path}`, p.logs && 'log checks'].filter(Boolean).join(' · ');
+  const pLine = p => [p.health && healthSummary(p.health), p.functional && `functional GET :${p.functional.port}${p.functional.path}`, p.logs && 'log checks'].filter(Boolean).join(' · ');
   const tLine = t => [`p95 ≤ ${t.max_allowed_p95_ms} ms`, t.verify_error_spike && 'error spike required', t.traffic && `traffic via ${t.traffic.service}`].filter(Boolean).join(' · ');
   return h`<div class="card"><div class="card-title"><h2>What is verified</h2></div>
     <div class="muted small" style="margin-bottom:10px">Set up by the site operator. Cluster invariants (fault injected, pod replaced, recovery time) are always checked; these services also get application and tracing checks.</div>
@@ -837,6 +865,7 @@ async function registerClusterApp(form) {
 document.addEventListener('change', ev => {
   const form = ev.target.closest && ev.target.closest('form[data-form=probes]');
   if (form && ev.target.name === 'service') fillProbeForm(form, ev.target.value);
+  if (form && ev.target.name === 'h_type') showHealthFields(form);
   const tform = ev.target.closest && ev.target.closest('form[data-form=tracing]');
   if (tform && ev.target.name === 'service') fillTracingForm(tform, ev.target.value);
 });
