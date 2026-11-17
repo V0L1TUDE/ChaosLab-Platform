@@ -709,7 +709,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         pass
     log(f"ChaosLab agent {VERSION} running. Server: {api.base}. Namespaces: {', '.join(policy.namespaces)}. "
         f"Faults: {', '.join(policy.faults)}. Max duration: {policy.max_duration}s. "
-        f"Probes: {'safe HTTP GET/log probes' if policy.allow_probes else 'disabled'}. "
+        f"Probes: {'safe HTTP GET, gRPC health and log probes' if policy.allow_probes else 'disabled'}. "
         f"Tracing: {('%s/%s:%d' % policy.jaeger) if policy.jaeger else 'not configured (--jaeger)'}. Outbound-only.")
     return agent.run_forever()
 
