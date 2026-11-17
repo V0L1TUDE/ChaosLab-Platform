@@ -168,7 +168,7 @@ async function pageDashboard() {
       <div class="card"><div class="card-title"><h2>Applications</h2><a href="#/apps" class="small">Manage</a></div>
         ${d.applications.length ? '' : h`<div class="empty">No applications yet.<br><a href="#/clusters">Connect a cluster</a> or <a href="#/apps">upload an application</a>.</div>`}
         ${d.applications.map(a => h`<div class="svc-row" style="padding:8px 0;border-bottom:1px solid #1d2a42">
-          <div><a href="#/apps/${a.id}"><b>${a.name}</b></a><div class="muted small">${a.is_builtin ? 'Built-in demo' : a.upload_type.toUpperCase() + ' upload'} · ${a.experiments_count} experiment(s)</div></div>
+          <div><a href="#/apps/${a.id}"><b>${a.name}</b></a><div class="muted small">${a.is_builtin ? 'Built-in demo' : (a.is_shared && !a.can_manage) ? 'Shared Live demo' : a.cluster_id ? 'Your cluster' : a.upload_type.toUpperCase() + ' upload'} · ${a.experiments_count} experiment(s)</div></div>
           ${statusBadge(a.status)}</div>`)}
       </div>
     </div>`));
@@ -200,11 +200,11 @@ async function pageApps() {
       <div class="card"><div class="card-title"><h2>Your applications</h2></div>
         <div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Uploaded</th><th></th></tr></thead><tbody>
         ${applications.map(a => h`<tr>
-          <td><a href="#/apps/${a.id}"><b>${a.name}</b></a>${a.is_builtin ? h` <span class="badge b-ready">BUILT-IN</span>` : ''}
+          <td><a href="#/apps/${a.id}"><b>${a.name}</b></a>${a.is_builtin ? h` <span class="badge b-ready">BUILT-IN</span>` : ''}${a.is_shared ? h` <span class="badge b-live">SHARED DEMO</span>` : ''}
             <div class="muted small">${a.description ? a.description.slice(0, 90) : ''}</div></td>
           <td class="mono">${a.upload_type}${a.file_size != null ? h`<div class="faint">${fmtBytes(a.file_size)}</div>` : ''}</td>
           <td>${statusBadge(a.status)}</td><td class="muted small">${fmtDate(a.created_at)}</td>
-          <td>${a.is_builtin ? '' : h`<button class="btn danger sm" data-action="delete-app" data-id="${a.id}" data-name="${a.name}">Delete</button>`}</td></tr>`)}
+          <td>${a.can_manage ? h`<button class="btn danger sm" data-action="delete-app" data-id="${a.id}" data-name="${a.name}">Delete</button>` : ''}</td></tr>`)}
         </tbody></table></div></div>
       <div class="card"><div class="card-title"><h2>Upload an application</h2></div>
         <div id="upload-error"></div>
@@ -245,18 +245,19 @@ async function pageAppDetail(id) {
     <div class="page-head"><div><a href="#/apps" class="small">← Applications</a>
       <h1>${a.name} ${statusBadge(a.status)}</h1><p>${a.description || 'No description.'}</p></div>
       <div class="actions">${a.executable ? h`<a class="btn primary" href="#/experiments/new?app=${a.id}">⚡ Run experiment</a>` : ''}
-        ${a.is_builtin ? '' : h`<button class="btn danger" data-action="delete-app" data-id="${a.id}" data-name="${a.name}" data-then="apps">Delete</button>`}</div></div>
+        ${a.can_manage ? h`<button class="btn danger" data-action="delete-app" data-id="${a.id}" data-name="${a.name}" data-then="apps">Delete</button>` : ''}</div></div>
     <div class="grid g4" style="margin-bottom:16px">
       <div class="stat"><div class="l">Services</div><div class="v">${cat ? cat.services_count : 'n/a'}</div><div class="s">${cat ? (cat.discovery.source === 'cluster' ? 'discovered from the cluster' : (a.is_builtin ? 'static list (cluster unavailable)' : 'from your manifests (not deployed)')) : 'no services (not a valid manifest upload)'}</div></div>
       <div class="stat"><div class="l">Experiments</div><div class="v">${a.experiments_count}</div><div class="s">your runs on this app</div></div>
       <div class="stat"><div class="l">Fault types</div><div class="v">${cat ? cat.faults.length : 'n/a'}</div><div class="s">${cat ? 'pod kill, network delay, network failure' : ''}</div></div>
-      <div class="stat"><div class="l">Registered</div><div class="v" style="font-size:16px;padding-top:8px">${fmtDate(a.created_at)}</div><div class="s">${a.is_builtin ? 'preconfigured' : a.cluster_id ? `your cluster · ns ${a.namespace}` : a.original_filename + ' · ' + fmtBytes(a.file_size)}</div></div>
+      <div class="stat"><div class="l">Registered</div><div class="v" style="font-size:16px;padding-top:8px">${fmtDate(a.created_at)}</div><div class="s">${a.is_builtin ? 'preconfigured' : (a.is_shared && !a.can_manage) ? `shared demo cluster · ns ${a.namespace}` : a.cluster_id ? `your cluster · ns ${a.namespace}` : a.original_filename + ' · ' + fmtBytes(a.file_size)}</div></div>
     </div>
     ${a.note ? h`<div class="banner info">${a.note}</div>` : ''}
-    ${a.cluster ? h`<div class="banner ${a.cluster.online && !a.cluster.paused ? 'live' : 'info'}">Cluster <a href="#/clusters/${a.cluster.id}"><b>${a.cluster.name}</b></a>: agent ${a.cluster.paused ? 'paused (emergency stop)' : a.cluster.online ? 'online' : 'offline'}.</div>` : ''}
+    ${a.cluster ? h`<div class="banner ${a.cluster.online && !a.cluster.paused ? 'live' : 'info'}">Cluster ${a.cluster.id ? h`<a href="#/clusters/${a.cluster.id}"><b>${a.cluster.name}</b></a>` : h`<b>${a.cluster.name}</b>`}: agent ${a.cluster.paused ? 'paused (emergency stop)' : a.cluster.online ? 'online' : 'offline'}.</div>` : ''}
     ${a.deployment ? deploymentCard(a) : ''}
-    ${a.cluster && a.catalog ? probesCard(a) : ''}
-    ${a.cluster && a.catalog ? tracingCard(a) : ''}
+    ${a.cluster && a.catalog && a.can_manage ? probesCard(a) : ''}
+    ${a.cluster && a.catalog && a.can_manage ? tracingCard(a) : ''}
+    ${a.cluster && !a.can_manage ? verifiedSummaryCard(a) : ''}
     ${cat ? h`<div class="grid g2" style="align-items:start">
       <div class="card"><div class="card-title"><h2>Services (namespace <code>${cat.namespace}</code>)</h2></div>
         ${discoveryNote(cat.discovery, a.id)}
@@ -435,6 +436,20 @@ async function saveTracing(form) {
   } catch (e) { box.innerHTML = h`<div class="banner err">${e.message}</div>`.s; }
 }
 
+/* ---------- shared demo: read-only view of what the Oracle verifies ---------- */
+function verifiedSummaryCard(a) {
+  const probes = Object.entries(a.probes || {});
+  const tracing = Object.entries(a.telemetry || {});
+  const pLine = p => [p.health && `health GET :${p.health.port}${p.health.path}`, p.functional && `functional GET :${p.functional.port}${p.functional.path}`, p.logs && 'log checks'].filter(Boolean).join(' · ');
+  const tLine = t => [`p95 ≤ ${t.max_allowed_p95_ms} ms`, t.verify_error_spike && 'error spike required', t.traffic && `traffic via ${t.traffic.service}`].filter(Boolean).join(' · ');
+  return h`<div class="card"><div class="card-title"><h2>What is verified</h2></div>
+    <div class="muted small" style="margin-bottom:10px">Set up by the site operator. Cluster invariants (fault injected, pod replaced, recovery time) are always checked; these services also get application and tracing checks.</div>
+    ${probes.length || tracing.length ? '' : h`<div class="muted small">Only the cluster invariants are checked for this application.</div>`}
+    ${probes.map(([svc, p]) => h`<div class="svc-row" style="padding:6px 0"><div><b>${svc}</b> <span class="muted small">probes: ${pLine(p)}</span></div></div>`)}
+    ${tracing.map(([svc, t]) => h`<div class="svc-row" style="padding:6px 0"><div><b>${svc}</b> <span class="muted small">tracing: ${tLine(t)}</span></div></div>`)}
+  </div>`;
+}
+
 /* ---------- service discovery status ---------- */
 function discoveryNote(d, refreshId) {
   const refresh = refreshId ? h` <button class="btn sm" data-action="refresh-services" data-id="${refreshId}">Refresh</button>` : '';
@@ -477,7 +492,7 @@ async function pageNewExperiment(appParam) {
       <div class="grid" style="grid-template-columns:2fr 1fr;align-items:start">
       <form data-form="experiment" id="exp-form">
         <div class="card"><h3><span class="step-n">1</span>Application</h3>
-          <div class="choices" style="margin-top:10px">${builtins.map(a => choice('app', a.id, a.name, a.is_builtin ? `${a.services_count} services · preconfigured` : a.cluster_id ? `your cluster · ${a.cluster_name}` : `your upload · ${a.status}`, a.id === current.id, false))}</div></div>
+          <div class="choices" style="margin-top:10px">${builtins.map(a => choice('app', a.id, a.name, a.is_builtin ? `${a.services_count} services · preconfigured` : (a.is_shared && !a.can_manage) ? `shared Live demo · ${a.cluster_name}` : a.cluster_id ? `your cluster · ${a.cluster_name}` : `your upload · ${a.status}`, a.id === current.id, false))}</div></div>
         <div class="card"><h3><span class="step-n">2</span>Target microservice</h3>
           ${discoveryNote(cat.discovery)}
           ${cat.targetable_services.length ? '' : h`<div class="banner err" style="margin:10px 0 0"><div><b>No services found in namespace <code>${cat.namespace}</code>.</b> Check the namespace name for typos (<code>kubectl get deployments -n ${cat.namespace}</code>). For a connected cluster, the agent's <code>--allowed-namespaces</code> must match it exactly, and Deployments need an <code>app</code> label.</div></div>`}
@@ -487,14 +502,14 @@ async function pageNewExperiment(appParam) {
           <div class="choices" style="margin-top:10px">${cat.faults.map(f => choice('fault', f.id, f.label, f.chaos_kind, form.fault === f.id, false))}</div>
           <div class="hint">${fault.description}</div></div>
         <div class="card"><h3><span class="step-n">4</span>Duration: <span class="mono" id="dur-val">${form.duration}s</span></h3>
-          <input type="range" name="duration" min="10" max="120" step="5" value="${form.duration}" style="margin-top:10px">
+          <input type="range" name="duration" min="10" max="${(current.is_shared && !current.can_manage) ? 60 : 120}" step="5" value="${form.duration}" style="margin-top:10px">
           <div class="hint">${fault.duration_meaning}</div></div>
         <div class="card"><h3><span class="step-n">5</span>Execution mode</h3>
           <div class="choices" style="margin-top:10px;grid-template-columns:1fr 1fr">
-            ${choice('mode', 'live', 'Live execution', liveOk ? (current.cluster_id ? 'Real fault in your cluster, run by your agent' : 'Real Chaos Mesh fault on the cluster') : liveWhy, form.mode === 'live', !liveOk)}
+            ${choice('mode', 'live', 'Live execution', liveOk ? ((current.is_shared && !current.can_manage) ? 'Real fault on the shared demo cluster' : current.cluster_id ? 'Real fault in your cluster, run by your agent' : 'Real Chaos Mesh fault on the cluster') : liveWhy, form.mode === 'live', !liveOk)}
             ${choice('mode', 'simulated', 'Demo execution (SIMULATED)', 'Predefined data, nothing is injected', form.mode === 'simulated', false)}
           </div>
-          ${form.mode === 'live' ? h`<div class="banner live" style="margin:12px 0 0">${current.cluster_id ? 'Live mode really injects the fault into YOUR cluster. The ChaosLab agent running there performs it (within its local allow-list) and sends back evidence.' : 'Live mode really injects the fault into the shared demo cluster using Chaos Mesh. Only one live experiment can run at a time.'}</div>`
+          ${form.mode === 'live' ? h`<div class="banner live" style="margin:12px 0 0">${(current.is_shared && !current.can_manage) ? 'Live mode really injects the fault into the shared demo cluster run by this site. One experiment at a time across all users; your results are private to you.' : current.cluster_id ? 'Live mode really injects the fault into YOUR cluster. The ChaosLab agent running there performs it (within its local allow-list) and sends back evidence.' : 'Live mode really injects the fault into the shared demo cluster using Chaos Mesh. Only one live experiment can run at a time.'}</div>`
             : h`<div class="banner sim" style="margin:12px 0 0">Demo mode plays predefined results. No fault is injected and every metric and invariant is labelled SIMULATED.</div>`}
         </div>
       </form>

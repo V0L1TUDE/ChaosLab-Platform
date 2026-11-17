@@ -125,6 +125,18 @@ sudo ./chaoslab/deploy/demo-cluster.sh --token cle_YOUR_TOKEN
 ```
 Register the application (namespace `project-platform`), add probes/tracing (same values as the laptop guide), and run
 Live experiments any time. Agent logs: `sudo journalctl -u chaoslab-agent -f`. Cluster: `sudo k3s kubectl get pods -A`.
+### Let every account use it (shared Live demo)
+By default only you see the demo application. To let **any** signed-in user run Live experiments on it, find its id
+(the number in the address bar, e.g. `#/apps/7`) and on the server:
+```bash
+echo 'CHAOSLAB_SHARED_APP_ID=7' | sudo tee -a /etc/chaoslab/chaoslab.env && sudo systemctl restart chaoslab
+```
+Other users then see it marked **SHARED DEMO** and can run experiments; their experiments and reports are private to
+them. They cannot change its probes/tracing, delete it, or see/stop the cluster (only you can, from your account).
+Fair use: one experiment at a time on the cluster, `CHAOSLAB_SHARED_LIVE_RUNS_PER_HOUR` (default 6) Live runs per user
+per hour, faults up to `CHAOSLAB_SHARED_MAX_DURATION_SECONDS` (default 60). While shared, the app cannot be deleted;
+remove the line and restart to stop sharing.
+
 To update the agent after `git pull`, re-run `sudo ./chaoslab/deploy/demo-cluster.sh` (no token needed): it refreshes the
 agent's own code copy in `/opt/chaoslab-agent` and restarts it with its saved credential. The agent log lists the
 evidence each job collected; the Oracle verdict is computed by the server and shown on the website.

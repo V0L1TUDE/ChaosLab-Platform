@@ -98,6 +98,14 @@ TLS_MODE = os.environ.get("CHAOSLAB_TLS_MODE", "auto").strip().lower()
 # applications (uploads, sandbox apps, connected clusters). Set CHAOSLAB_SHOW_DEMO_APPS=true to expose the demos.
 SHOW_DEMO_APPS = _env_bool("CHAOSLAB_SHOW_DEMO_APPS", False)
 
+# Shared Live demo, chosen by the site operator: ONE application registered on one of the operator's connected
+# clusters that every signed-in user may run experiments against. Other users can only view it and run experiments
+# (their experiments and reports stay private to them); they cannot change its probes/tracing, delete it, or touch the
+# cluster. 0 = off. Fair use: Live runs per user per hour, and a shorter maximum fault duration for guests.
+SHARED_APP_ID = _env_int("CHAOSLAB_SHARED_APP_ID", 0)
+SHARED_LIVE_RUNS_PER_HOUR = _env_int("CHAOSLAB_SHARED_LIVE_RUNS_PER_HOUR", 6)
+SHARED_MAX_DURATION_SECONDS = _env_int("CHAOSLAB_SHARED_MAX_DURATION_SECONDS", 60)
+
 # Cluster service discovery (read-only `kubectl get deployments`); falls back to a static list.
 DISCOVERY_ENABLED = _env_bool("CHAOSLAB_DISCOVERY_ENABLED", True)
 

@@ -7,8 +7,37 @@ from . import catalog, config, db, deployments, manifests, probe_spec, telemetry
 from .http_core import HttpError, json_response, router
 
 
-def app_to_dict(row, experiments_count: int = 0) -> Dict[str, Any]:
+def shared_app_id() -> int:
+    """The operator's shared Live demo application id, or -1 when the feature is off."""
+    return config.SHARED_APP_ID if config.SHARED_APP_ID > 0 else -1
+
+
+def is_shared_guest(row, user_id: int) -> bool:
+    """True when `user_id` sees this app only because it is the shared demo (they do not own it)."""
+    return row["id"] == shared_app_id() and row["user_id"] is not None and row["user_id"] != user_id
+
+
+def require_owner(row, user_id: int) -> None:
+    if is_shared_guest(row, user_id):
+        raise HttpError(403, "The shared demo application is managed by the site operator.")
+
+
+# Apps a user can see: their own, the built-in demos (if enabled), and the operator's shared demo (cluster apps only).
+VISIBLE_APPS_WHERE = "(a.user_id = ? OR (a.user_id IS NULL AND ?) OR (a.id = ? AND a.cluster_id IS NOT NULL))"
+
+
+def visible_apps(conn, uid: int):
+    return conn.execute(
+        "SELECT a.*, (SELECT COUNT(*) FROM experiments e WHERE e.application_id = a.id AND e.user_id = ?) AS n "
+        f"FROM applications a WHERE {VISIBLE_APPS_WHERE} "
+        "ORDER BY (a.user_id IS NULL) DESC, (a.id = ?) DESC, CASE WHEN a.user_id IS NULL THEN a.id END ASC, a.id DESC",
+        (uid, uid, int(config.SHOW_DEMO_APPS), shared_app_id(), shared_app_id()),
+    ).fetchall()
+
+
+def app_to_dict(row, experiments_count: int = 0, user_id: Optional[int] = None) -> Dict[str, Any]:
     builtin = row["user_id"] is None
+    guest = user_id is not None and is_shared_guest(row, user_id)
     d = {
         "id": row["id"],
         "name": row["name"],
@@ -22,7 +51,11 @@ def app_to_dict(row, experiments_count: int = 0) -> Dict[str, Any]:
         "executable": builtin or row["status"] in ("validated", "deployed") or bool(row["cluster_id"]),   # can run experiments
         "deployable": (not builtin) and row["status"] in ("validated", "deploy_failed"),
         "experiments_count": experiments_count,
+        "is_shared": row["id"] == shared_app_id() and bool(row["cluster_id"]),
+        "can_manage": (not builtin) and not guest,
     }
+    if guest:
+        d["deployable"] = False
     d["slug"] = row["slug"]
     d["cluster_id"] = row["cluster_id"]
     if row["cluster_id"]:
@@ -42,10 +75,10 @@ def app_to_dict(row, experiments_count: int = 0) -> Dict[str, Any]:
 
 
 def get_accessible_app(conn, user_id: int, app_id: int):
-    """Own uploads + built-in apps only. Other users' apps look like 404 (no existence leak)."""
+    """Own apps, built-in apps and the shared demo. Other users' apps look like 404 (no existence leak)."""
     row = conn.execute(
-        "SELECT * FROM applications WHERE id = ? AND (user_id = ? OR (user_id IS NULL AND ?))",
-        (app_id, user_id, int(config.SHOW_DEMO_APPS))
+        f"SELECT a.* FROM applications a WHERE a.id = ? AND {VISIBLE_APPS_WHERE}",
+        (app_id, user_id, int(config.SHOW_DEMO_APPS), shared_app_id())
     ).fetchone()
     if not row:
         raise HttpError(404, "Application not found.")
@@ -63,13 +96,8 @@ def _app_id(req) -> int:
 def list_applications(req):
     uid = req.user["id"]
     with db.session() as conn:
-        rows = conn.execute(
-            "SELECT a.*, (SELECT COUNT(*) FROM experiments e WHERE e.application_id = a.id AND e.user_id = ?) AS n "
-            "FROM applications a WHERE a.user_id = ? OR (a.user_id IS NULL AND ?) "
-            "ORDER BY (a.user_id IS NULL) DESC, CASE WHEN a.user_id IS NULL THEN a.id END ASC, a.id DESC",
-            (uid, uid, int(config.SHOW_DEMO_APPS)),
-        ).fetchall()
-    return json_response({"applications": [app_to_dict(r, r["n"]) for r in rows]})
+        rows = visible_apps(conn, uid)
+    return json_response({"applications": [app_to_dict(r, r["n"], uid) for r in rows]})
 
 
 @router.route("POST", "/api/applications")
@@ -127,20 +155,27 @@ def application_detail(req):
             "FROM experiments WHERE application_id = ? AND user_id = ? ORDER BY id DESC LIMIT 50",
             (row["id"], uid),
         ).fetchall()
-    data = app_to_dict(row, len(exps))
+    data = app_to_dict(row, len(exps), uid)
     data["experiments"] = [dict(e) for e in exps]
     if row["user_id"] is None:
         data["catalog"] = catalog.describe_app(catalog.get_builtin(row["slug"]), force=req.qs("refresh") == "1")
     else:
         resolved = catalog.resolve_app(row)
         if row["cluster_id"]:
-            data["note"] = ("This application runs in your own cluster. Experiments are executed by the ChaosLab agent "
-                            "inside that cluster; nothing is deployed or changed by this server.")
+            guest = is_shared_guest(row, uid)
+            data["note"] = (
+                ("Shared Live demo: this application runs on a real Kubernetes cluster operated by this ChaosLab site. "
+                 "Your experiments inject real faults there and are verified by the Oracle; they and their reports are "
+                 f"visible only to you. Fair use: one experiment at a time on the cluster, up to "
+                 f"{config.SHARED_LIVE_RUNS_PER_HOUR} Live runs per hour, faults up to {config.SHARED_MAX_DURATION_SECONDS}s.")
+                if guest else
+                ("This application runs in your own cluster. Experiments are executed by the ChaosLab agent "
+                 "inside that cluster; nothing is deployed or changed by this server."))
             if resolved:
                 data["probes"] = resolved["probes"]
                 data["telemetry"] = resolved["telemetry"]
                 data["catalog"] = catalog.describe_app(resolved)
-                data["cluster"] = {"id": resolved["cluster_id"], "name": resolved["cluster_name"],
+                data["cluster"] = {"id": None if guest else resolved["cluster_id"], "name": resolved["cluster_name"],
                                    "online": resolved["cluster_online"], "paused": resolved["cluster_paused"],
                                    "telemetry_source": resolved["telemetry_source"]}
             else:
@@ -164,6 +199,10 @@ def delete_application(req):
         row = get_accessible_app(conn, uid, _app_id(req))
         if row["user_id"] is None:
             raise HttpError(403, "The built-in demo application cannot be deleted.")
+        require_owner(row, uid)
+        if row["id"] == shared_app_id():
+            # Deleting would cascade to every other user's experiments and reports on the shared demo.
+            raise HttpError(409, "This application is the shared Live demo. Remove CHAOSLAB_SHARED_APP_ID on the server first.")
         if row["status"] == "deploying":
             raise HttpError(409, "Deployment is still in progress. Try again in a moment.")
         if row["status"] in ("deployed", "deploy_failed") or row["namespace"]:
@@ -185,6 +224,7 @@ def delete_application(req):
 def deploy_application(req):
     with db.session() as conn:
         row = get_accessible_app(conn, req.user["id"], _app_id(req))
+    require_owner(row, req.user["id"])
     try:
         deployments.start_deploy(row["id"], req.user["id"])
     except deployments.DeployRejected as e:
@@ -200,6 +240,7 @@ def undeploy_application(req):
         row = get_accessible_app(conn, req.user["id"], _app_id(req))
     if row["user_id"] is None:
         raise HttpError(403, "Built-in applications are managed by the platform.")
+    require_owner(row, req.user["id"])
     try:
         deployments.undeploy(row["id"], req.user["id"])
     except deployments.DeployRejected as e:
