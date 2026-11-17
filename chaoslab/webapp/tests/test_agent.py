@@ -105,6 +105,26 @@ class PolicyTests(unittest.TestCase):
             agent_mod.Policy(["Bad_NS"])
 
 
+
+class LoggingTests(unittest.TestCase):
+    """The agent must not present the engine's partial (cluster-only) verdict as the result."""
+
+    def test_engine_console_report_is_silenced(self):
+        eng = agent_mod._engine(None)
+        self.assertIs(eng.print, agent_mod._engine_print)
+
+    def test_evidence_summary_has_no_verdict(self):
+        line = agent_mod._evidence_summary({
+            "verdict": "PASS", "recovery_time_seconds": 6.39,
+            "application": {"health_status": "200 OK"},
+            "telemetry": {"available": True, "traces_count": 8, "error_spans_count": 5}})
+        self.assertEqual(line, "recovery 6.39s, probes health 200 OK, traces 8, error spans 5")
+        self.assertNotIn("PASS", line)
+        self.assertIn("tracing not collected", agent_mod._evidence_summary(
+            {"telemetry": {"available": False, "collection_error": "Jaeger down"}}))
+        self.assertEqual(agent_mod._evidence_summary({}), "cluster evidence only")
+
+
 class TransportTests(unittest.TestCase):
     def test_plain_http_is_refused_except_localhost(self):
         with self.assertRaises(ValueError):

@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 DNS_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 DURATION_RE = re.compile(r"^(\d{1,3})s$")
@@ -299,6 +299,26 @@ PHASE_TO_STAGE = {"baseline": "baseline", "injecting": "fault_injection", "waiti
                   "oracle": "oracle", "completed": "completed"}
 
 
+def _engine_print(*args, **kwargs) -> None:
+    """Swallow the engine's console report (see _engine); progress still reaches the server as events."""
+
+
+def _evidence_summary(report: Dict[str, Any]) -> str:
+    """One honest log line about what was collected. The verdict itself is computed by the server."""
+    parts = []
+    rec = report.get("recovery_time_seconds", report.get("recovery_seconds"))
+    if isinstance(rec, (int, float)):
+        parts.append(f"recovery {rec:.2f}s")
+    app = report.get("application")
+    if isinstance(app, dict):
+        parts.append(f"probes health {app.get('health_status')}")
+    tel = report.get("telemetry")
+    if isinstance(tel, dict):
+        parts.append(f"traces {tel.get('traces_count')}, error spans {tel.get('error_spans_count')}" if tel.get("available")
+                     else f"tracing not collected ({str(tel.get('collection_error'))[:80]})")
+    return ", ".join(parts) or "cluster evidence only"
+
+
 def _engine(verifier_dir: Optional[str]):
     cand = [verifier_dir, os.environ.get("CHAOSLAB_VERIFIER_DIR"),
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "verifier"),
@@ -309,6 +329,10 @@ def _engine(verifier_dir: Optional[str]):
             if path not in sys.path:
                 sys.path.insert(0, path)
             import engine  # flat import, as in the ChaosLab repo
+            # The engine prints its own report and a local Oracle verdict. On an agent that verdict is misleading: it is
+            # computed before the probe/tracing evidence is added, and the server re-evaluates everything anyway.
+            # A module-level `print` shadows the builtin for the engine module only.
+            engine.print = _engine_print
             return engine
     raise RuntimeError("ChaosLab engine not found (expected ../verifier/engine.py or CHAOSLAB_VERIFIER_DIR).")
 
@@ -378,6 +402,10 @@ def engine_executor(job: Dict[str, Any], cfg: Dict[str, Any], reporter: Reporter
             return
         if data:
             state["report"] = data
+        if phase in ("oracle", "completed"):
+            # The engine's own verdict covers cluster evidence only; the server's verdict (with probes/tracing) is final.
+            message = ("Cluster evidence collected (pods, fault, recovery). The server evaluates the Oracle "
+                       "once all evidence is in." if phase == "completed" else "Cluster phase finished; preparing evidence...")
         reporter.event(PHASE_TO_STAGE.get(phase, "baseline"), message, percent)
 
     runner = threading.Thread(target=lambda: _safe_run(eng, cfg_path, on_progress, state), daemon=True)
@@ -566,7 +594,13 @@ class Agent:
         reporter.flush()
         try:
             self.api.post(f"/agent/v1/jobs/{job['job_id']}/result", outcome, bearer=job["job_token"], timeout=60)
-            log(f"Job {job['job_id']} finished: {'cancelled' if outcome.get('cancelled') else 'error' if outcome.get('error') else 'ok'}")
+            if outcome.get("cancelled"):
+                log(f"Job {job['job_id']} cancelled.")
+            elif outcome.get("error"):
+                log(f"Job {job['job_id']} failed: {str(outcome['error'])[:300]}")
+            else:
+                log(f"Job {job['job_id']} evidence sent ({_evidence_summary(outcome.get('report') or {})}). "
+                    "The server computes the Oracle verdict: see the experiment on the website.")
         except ApiError as e:
             log(f"could not deliver result for job {job['job_id']}: {e}")
 
