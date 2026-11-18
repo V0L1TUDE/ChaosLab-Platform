@@ -338,6 +338,15 @@ class ApplicationLogsRule(VerificationRule):
             status=status
         )
 
+def _telemetry_unavailable(rule_name: str, evidence: Dict[str, Any]) -> Optional[RuleResult]:
+    """Telemetry was configured but could not be collected (agent marks this): SKIPPED, never PASS or FAIL."""
+    err = (evidence.get("telemetry") or {}).get("collection_error")
+    if err:
+        return RuleResult(rule_name, False, f"Telemetry could not be collected: {err}", observed="unavailable",
+                          expected="trace data", status=RuleStatus.SKIPPED)
+    return None
+
+
 class TelemetryRecordedRule(VerificationRule):
     """Verifies that OpenTelemetry distributed tracing recorded transactions for the service."""
 
@@ -355,6 +364,10 @@ class TelemetryRecordedRule(VerificationRule):
                 expected="N/A",
                 status=RuleStatus.NOT_APPLICABLE
             )
+
+        unavailable = _telemetry_unavailable(self.name, evidence)
+        if unavailable:
+            return unavailable
 
         telemetry = evidence.get("telemetry", {})
         traces_count = telemetry.get("traces_count", 0)
@@ -392,6 +405,10 @@ class TelemetryErrorSpikeRule(VerificationRule):
                 status=RuleStatus.NOT_APPLICABLE
             )
 
+        unavailable = _telemetry_unavailable(self.name, evidence)
+        if unavailable:
+            return unavailable
+
         telemetry = evidence.get("telemetry", {})
         error_count = telemetry.get("fault_window_errors", telemetry.get("error_spans_count", 0))
         passed = error_count > 0
@@ -421,6 +438,10 @@ class TelemetryLatencyRule(VerificationRule):
                 expected="N/A",
                 status=RuleStatus.NOT_APPLICABLE
             )
+
+        unavailable = _telemetry_unavailable(self.name, evidence)
+        if unavailable:
+            return unavailable
 
         telemetry = evidence.get("telemetry", {})
         latency_info = telemetry.get("latency_ms", {})

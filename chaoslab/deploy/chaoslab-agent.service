@@ -1,0 +1,31 @@
+[Unit]
+Description=ChaosLab agent for the always-on demo cluster
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+User=chaoslab-agent
+Group=chaoslab-agent
+EnvironmentFile=/etc/chaoslab-agent/agent.env
+WorkingDirectory=/opt/chaoslab-agent/agent
+ExecStart=/usr/bin/python3 /opt/chaoslab-agent/agent/agent.py
+Restart=on-failure
+RestartSec=10
+# exit code 2 = credential revoked / cluster changed: needs a new token, so do not restart in a loop
+RestartPreventExitStatus=2
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/chaoslab-agent
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
