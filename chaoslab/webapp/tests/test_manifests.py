@@ -7,9 +7,9 @@ import zipfile
 
 import yaml
 
-from webapp import manifests
+import harness  # noqa: F401  (sets isolated env and sys.path before webapp.config is used)
 
-import harness  # noqa: F401  (sets isolated env before webapp.config is used)
+from webapp import manifests  # noqa: E402
 
 
 def dep(name="web", image="nginx:1.27-alpine", **over):
@@ -108,7 +108,7 @@ class RejectionTests(unittest.TestCase):
         d = dep(); d["spec"]["template"]["spec"]["containers"][0]["securityContext"] = {"capabilities": {"add": ["SYS_ADMIN"]}}
         self.assertRejected([d], "capabilities: field is not allowed")
         d = dep(); d["spec"]["template"]["spec"]["containers"][0]["securityContext"] = {"allowPrivilegeEscalation": True}
-        self.assertRejected([d], "allowPrivilegeEscalation: must not be true")
+        self.assertRejected([d], "allowPrivilegeEscalation: must be false")
         d = dep(); d["spec"]["template"]["spec"]["serviceAccountName"] = "admin"
         self.assertRejected([d], "serviceAccountName: field is not allowed")
         d = dep(); d["spec"]["template"]["spec"]["initContainers"] = [{"name": "i", "image": "busybox:1"}]

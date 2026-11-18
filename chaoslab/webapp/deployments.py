@@ -15,8 +15,7 @@ import time
 import traceback
 from typing import Any, Dict, Optional
 
-from . import config, db, k8s_deploy
-from .live_backend import live_capability
+from . import config, db, k8s_deploy, tenant_isolation
 
 
 class DeployRejected(Exception):
@@ -61,9 +60,10 @@ def _active_experiments(conn, app_id: int) -> int:
 def start_deploy(app_id: int, user_id: int) -> None:
     if not config.DEPLOY_ENABLED:
         raise DeployRejected("Deploying uploaded applications is disabled on this server (CHAOSLAB_DEPLOY_ENABLED=false).", 503)
-    cap = live_capability()
-    if not cap["available"]:
-        raise DeployRejected(f"Cannot deploy: {cap['reason']}", 503)
+    # Fail closed: uploaded workloads only run on a verified, isolated tenant runtime (see tenant_isolation.py).
+    gate = tenant_isolation.preflight()
+    if not gate["ready"]:
+        raise DeployRejected(f"Cannot deploy: the isolated tenant runtime is not available. {gate['reason']}", 503)
     with db.session() as conn:
         row = conn.execute("SELECT * FROM applications WHERE id = ? AND user_id = ?", (app_id, user_id)).fetchone()
         if not row:
@@ -119,7 +119,9 @@ def undeploy(app_id: int, user_id: Optional[int] = None, force: bool = False) ->
             raise DeployRejected("Deployment is still in progress.", 409)
         if _active_experiments(conn, app_id):
             raise DeployRejected("An experiment is running on this application. Wait for it to finish.", 409)
-    ok, msg = k8s_deploy.undeploy(app_id)
+        already_clean = row["status"] in ("deploy_failed", "validated", "invalid", "registered") and not row["namespace"]
+    # A failed deploy tears its namespace down itself (and clears `namespace`): nothing left in the cluster.
+    ok, msg = (True, "nothing deployed") if already_clean else k8s_deploy.undeploy(app_id)
     if not ok:
         raise DeployRejected(msg, 502)
     with db.session() as conn:

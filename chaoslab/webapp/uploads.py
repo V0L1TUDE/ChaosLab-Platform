@@ -3,21 +3,21 @@ Application upload validation and storage
 =========================================
 Uploaded files are registered and stored, NEVER extracted or executed. Validation:
 extension allow-list, size limit, content sniffing (magic bytes / UTF-8 / JSON parse),
-archive path-traversal check, executable rejection, and server-generated storage names.
+bounded archive inspection (archive_guard: entry count, decompressed size and ratio, paths, links,
+time budget), executable rejection, and server-generated storage names.
+
+`inspect()` validates without storing anything; `store()` writes bytes that already passed `inspect()` (and,
+for manifests, manifests.analyze()). The upload route always validates first, then stores.
 """
 
-import io
 import json
 import re
-import tarfile
 import uuid
-import zipfile
-from typing import Dict, Tuple
+from typing import Dict
 
-from . import config, storage
+from . import archive_guard, config, storage
 
 _SAFE_CHARS = re.compile(r"[^A-Za-z0-9._ -]")
-_ARCHIVE_MEMBER_LIMIT = 20000
 
 
 class UploadError(Exception):
@@ -42,11 +42,6 @@ def detect_extension(filename: str) -> str:
     raise UploadError(f"File type not allowed. Allowed types: {allowed}.", 415)
 
 
-def _is_unsafe_member(name: str) -> bool:
-    norm = name.replace("\\", "/")
-    return norm.startswith("/") or re.match(r"^[A-Za-z]:", norm) is not None or ".." in norm.split("/")
-
-
 def _validate_content(ext: str, data: bytes) -> None:
     if not data:
         raise UploadError("The uploaded file is empty.")
@@ -54,56 +49,42 @@ def _validate_content(ext: str, data: bytes) -> None:
     if data[:2] == b"MZ" or data[:4] == b"\x7fELF" or data[:2] == b"#!" or data[:4] in (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"):
         raise UploadError("Executable files are not accepted.", 415)
 
-    if ext == ".zip":
-        if not data.startswith(b"PK\x03\x04"):
-            raise UploadError("File content is not a valid ZIP archive.", 415)
+    try:
+        if ext == ".zip":
+            archive_guard.inspect_zip(data)
+        elif ext in (".tar", ".tar.gz", ".tgz"):
+            archive_guard.inspect_tar(data, gz=ext != ".tar")
+    except archive_guard.ArchiveRejected as e:
+        raise UploadError(str(e), 415)
+    if ext in (".zip", ".tar", ".tar.gz", ".tgz"):
+        return
+    # text formats
+    if b"\x00" in data:
+        raise UploadError("File does not look like a text file.", 415)
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise UploadError("Text files must be UTF-8 encoded.", 415)
+    if ext == ".json":
         try:
-            with zipfile.ZipFile(io.BytesIO(data)) as zf:
-                names = zf.namelist()
-                bad = zf.testzip()
-        except zipfile.BadZipFile:
-            raise UploadError("File content is not a valid ZIP archive.", 415)
-        if bad:
-            raise UploadError("ZIP archive is corrupted.", 415)
-        if len(names) > _ARCHIVE_MEMBER_LIMIT or any(_is_unsafe_member(n) for n in names):
-            raise UploadError("Archive contains unsafe or too many entries.", 415)
-    elif ext in (".tar", ".tar.gz", ".tgz"):
-        if ext != ".tar" and data[:2] != b"\x1f\x8b":
-            raise UploadError("File content is not a valid gzip archive.", 415)
-        try:
-            with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tf:
-                count = 0
-                for member in tf:
-                    count += 1
-                    if count > _ARCHIVE_MEMBER_LIMIT or _is_unsafe_member(member.name) or member.issym() or member.islnk():
-                        raise UploadError("Archive contains unsafe or too many entries.", 415)
-        except UploadError:
-            raise
-        except (tarfile.TarError, OSError, EOFError):
-            raise UploadError("File content is not a valid TAR archive.", 415)
-    else:  # text formats
-        if b"\x00" in data:
-            raise UploadError("File does not look like a text file.", 415)
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
-            raise UploadError("Text files must be UTF-8 encoded.", 415)
-        if ext == ".json":
-            try:
-                json.loads(text)
-            except ValueError:
-                raise UploadError("File is not valid JSON.", 415)
+            json.loads(text)
+        except (ValueError, RecursionError):
+            raise UploadError("File is not valid JSON.", 415)
 
 
-def validate_and_store(user_id: int, filename: str, data: bytes) -> Dict[str, object]:
-    """Validate an upload and hand it to the configured storage backend. Returns metadata for the DB row."""
+def inspect(filename: str, data: bytes) -> str:
+    """Validate an upload without storing it. Returns the detected extension (e.g. '.zip')."""
     if not filename:
         raise UploadError("A file is required.")
     if len(data) > config.MAX_UPLOAD_BYTES:
         raise UploadError(f"File exceeds the {config.MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.", 413)
     ext = detect_extension(filename)
     _validate_content(ext, data)
+    return ext
 
+
+def store(user_id: int, filename: str, data: bytes, ext: str) -> Dict[str, object]:
+    """Hand already-inspected bytes to the configured storage backend. Returns metadata for the DB row."""
     key = f"user_{int(user_id)}/{uuid.uuid4().hex}{ext}"      # server-generated: no user input in the key
     try:
         backend = storage.get_storage()
@@ -117,6 +98,11 @@ def validate_and_store(user_id: int, filename: str, data: bytes) -> Dict[str, ob
         "file_size": len(data),
         "upload_type": ext.lstrip("."),
     }
+
+
+def validate_and_store(user_id: int, filename: str, data: bytes) -> Dict[str, object]:
+    """inspect() then store(): for uploads that are not deployable manifests."""
+    return store(user_id, filename, data, inspect(filename, data))
 
 
 def delete_stored_file(ref: str, backend_name: str = "local") -> None:

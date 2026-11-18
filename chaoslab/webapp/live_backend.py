@@ -141,10 +141,14 @@ class LiveBackend(ExecutionBackend):
         is_network = "network" in str(report.get("fault", "")).lower()
         notes = ["Collected live from the ChaosLab engine. Latency series are only available when "
                  "Jaeger telemetry is enabled for the experiment."]
+        measured = report.get("recovery_measured") is True
         if is_network:
-            notes.append("Network faults: the engine does not measure recovery time (it reports a nominal 0.5 s after a "
-                         "fixed 5 s observation), so recovery time is shown as not measured. The "
-                         "recovery_within_timeout invariant uses that nominal engine value.")
+            notes.append("Network faults: recovery time is measured from the moment the fault is removed until the "
+                         "expected replicas are Ready." if measured else
+                         "Network faults: this evidence carries no recovery measurement (older engine/agent), so recovery "
+                         "time is shown as not measured and the recovery_within_timeout invariant is SKIPPED.")
+        elif not measured and report.get("recovery_time_seconds") is None:
+            notes.append("Recovery was not observed, so no recovery time is reported.")
         tel = report.get("telemetry") or {}
         lat = tel.get("latency_ms") or {}
         baseline = report.get("baseline", {})
@@ -161,8 +165,10 @@ class LiveBackend(ExecutionBackend):
                 "replacement_pod": report.get("replacement_pod"),
             },
             metrics={
-                "recovery_seconds": None if is_network else report.get("recovery_time_seconds"),
-                "total_recovery_seconds": None if is_network else report.get("total_recovery_seconds"),
+                # Only measured values are shown as measurements (never the nominal values older engines reported).
+                "recovery_seconds": report.get("recovery_time_seconds") if (measured or not is_network) else None,
+                "total_recovery_seconds": report.get("total_recovery_seconds") if (measured or not is_network) else None,
+                "recovery_measured": measured or (not is_network and report.get("recovery_time_seconds") is not None),
                 "baseline_p95_ms": None,
                 "peak_p95_ms": None,
                 "post_recovery_p95_ms": lat.get("p95") if tel.get("traces_count") else None,

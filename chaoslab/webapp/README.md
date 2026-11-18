@@ -36,7 +36,11 @@ cd chaoslab && python -m unittest discover -s webapp/tests
 | `CHAOSLAB_DB_PATH` | `<data>/chaoslab.db` | SQLite file |
 | `CHAOSLAB_UPLOAD_DIR` | `<data>/uploads` | Uploaded files when `CHAOSLAB_STORAGE=local` |
 | `CHAOSLAB_SHOW_DEMO_APPS` | `false` | Expose the 3 built-in demo apps to every user. **Off by default**: users only see their own apps (uploads, sandbox apps, connected clusters) |
-| `CHAOSLAB_DEPLOY_ENABLED` | = `CHAOSLAB_LIVE_ENABLED` | Allow deploying uploaded manifests to the cluster |
+| `CHAOSLAB_DEPLOY_ENABLED` | `false` | Allow deploying uploaded manifests. **Fail closed**: even when `true`, every deploy is refused until the isolated tenant runtime passes the preflight (see `deploy/tenant/README.md`) |
+| `CHAOSLAB_TENANT_KUBECONFIG` | (unset) | Least-privilege tenant credentials; the ONLY cluster identity the server uses when set (never cluster-admin) |
+| `CHAOSLAB_TENANT_RUNTIME_CLASS` | (unset) | Sandboxed RuntimeClass (gVisor `runsc` or Kata handler) on the tenant nodes |
+| `CHAOSLAB_TENANT_NODE_LABEL` | `chaoslab.io/tenant-pool=true` | Label (and NoSchedule taint) of the dedicated tenant node pool |
+| `CHAOSLAB_TENANT_ISOLATION_VERIFIED` | (unset) | Operator attestation printed by `deploy/tenant/verify_isolation.py` |
 | `CHAOSLAB_DEPLOY_TTL_MINUTES` | `120` | Auto-undeploy age (`0` disables) |
 | `CHAOSLAB_DEPLOY_TIMEOUT_SECONDS` | `180` | Wait for workloads to become Ready |
 | `CHAOSLAB_MAX_DEPLOYED_PER_USER` / `_TOTAL` | `2` / `6` | Concurrent deployed apps |
@@ -112,16 +116,23 @@ HTTP to non-local servers) and set `CHAOSLAB_COOKIE_SECURE=true`.
 ### Uploaded applications: validate, deploy, test (strict sandbox)
 Upload Kubernetes manifests (a `.yaml`, or a `.zip` containing `.yaml` files; see `examples/hello-two-tier.yaml`).
 
+0. **Inspect (before anything is stored)**: `archive_guard.py` bounds archive inspection by entry count, declared and
+   actual decompressed size, compression ratio, path depth/length, link and device entries, encryption and a time budget;
+   YAML is checked for anchors and nesting depth before it is parsed. Hostile inputs get a 4xx, never a 500. Manifests are
+   validated **before** the upload is stored, and only the sanitized result can ever be deployed.
 1. **Validate (at upload, in memory)**: `manifests.py` accepts only `Deployment`, `Service` (ClusterIP) and `ConfigMap`, and only a
    whitelisted subset of their fields. It rejects privileged containers, host network/PID/paths, capabilities, Secrets, PVCs, RBAC,
    Ingress, NodePort/LoadBalancer, init containers, service accounts, any unknown field, YAML anchors/aliases, oversized or
    malformed files. Images must pin a tag (not `latest`) or digest and come from an allowed registry. Replicas, CPU and memory are capped.
    A missing `app` label is added automatically (ChaosLab targets pods by it). The sanitized result is stored in the DB:
    what is deployed is exactly what was validated. Status becomes `validated` or `invalid` (with every error listed).
-2. **Deploy (button, background job)**: namespace `cl-app-<id>` (derived from the numeric id) with Pod Security `baseline`
-   enforcement, ResourceQuota, LimitRange, a default-deny NetworkPolicy (in-namespace + DNS only), and workloads hardened at
-   apply time (no service-account token, no service links, seccomp RuntimeDefault, no privilege escalation).
-   It waits for readiness; on failure it reports pod reasons (e.g. `ImagePullBackOff`), cleans up and allows a retry.
+2. **Deploy (button, background job; OFF by default)**: only on a verified isolated tenant runtime (`tenant_isolation.py`:
+   least-privilege credentials, gVisor/Kata RuntimeClass, dedicated tainted non-control-plane nodes, ChaosLab's admission
+   policies in Deny mode, operator attestation). Namespace `cl-app-<id>` with Pod Security `restricted`, ResourceQuota,
+   LimitRange, a default-deny NetworkPolicy (in-namespace + DNS only), and workloads hardened at render time (sandbox runtime,
+   tenant nodes, non-root, seccomp RuntimeDefault, no escalation, drop ALL capabilities, no token, explicit limits, qualified
+   images always pulled). Before the workloads, a non-compliant canary dry run must be **denied** by the admission policy;
+   after they are Ready, every pod must show the sandbox runtime on a tenant node. Any failure cleans up and allows a retry.
 3. **Test**: services are discovered from the sandbox namespace; Live experiments run the real engine against it; Simulated runs
    work as soon as the manifests validate. Live verification of uploaded apps covers the infrastructure invariants; application and
    telemetry invariants are `N/A` (no probes are known for arbitrary apps).
@@ -234,12 +245,14 @@ mode for the curated experiments that configure probes (e.g. `paymentservice` po
   no mTLS/key pinning yet, and the control plane is a single process (SQLite + threads).
 * Uploaded apps must be Kubernetes manifests (Deployment/Service/ConfigMap with registry images): no Secrets, volumes beyond
   emptyDir/ConfigMap, Ingress, StatefulSets, init containers, or building from source. Application/telemetry invariants are N/A for them.
-* The sandbox shares the cluster's nodes and kernel (namespace + admission + quota + network policy isolation, not a VM boundary);
-  do not expose deployment to untrusted public users without stronger isolation (gVisor/Kata, dedicated node pool).
+* Deploying uploads needs a separately operated tenant cluster/node pool with gVisor or Kata (`deploy/tenant/README.md`);
+  until that is configured and verified, deployment stays disabled (the public EC2 deployment has none).
 * Live mode targets one shared cluster with a global one-run-at-a-time lock; any signed-in user may run Live
   faults against it (disable with `CHAOSLAB_LIVE_ENABLED=false` on shared deployments).
-* Live network faults: the engine does not measure recovery (it reports a nominal 0.5 s after a fixed 5 s window), so
-  recovery time is shown as "not measured" for them.
+* Live network faults: recovery is measured from fault removal until the expected replicas are Ready. Evidence from older
+  engines/agents (which reported a nominal value) is shown as "not measured" and its recovery invariant is SKIPPED.
+* `fault_injected` passes only on positive Chaos Mesh evidence (`AllInjected` or an `Apply`/`Succeeded` record), never on a
+  successful `kubectl apply` alone.
 * Live latency time-series need Jaeger telemetry; otherwise only readiness is charted. The engine's network-fault path
   has a fixed 5 s observation window and a nominal recovery value (existing engine behaviour).
 * Stdlib HTTP server, SQLite and in-memory login throttling suit a single instance, not horizontal scale.

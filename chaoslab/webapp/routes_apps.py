@@ -119,18 +119,27 @@ def upload_application(req):
     if not f or not f["filename"]:
         raise HttpError(400, "An application file is required.")
 
+    # 1. Validate first: bounded content/archive inspection, nothing is stored yet.
     try:
-        meta = uploads.validate_and_store(req.user["id"], f["filename"], f["data"])
+        ext = uploads.inspect(f["filename"], f["data"])
     except uploads.UploadError as e:
         raise HttpError(e.status, str(e))
 
-    # Kubernetes manifest uploads (.yaml/.yml/.zip with yaml) are validated in memory against the strict sandbox.
+    # 2. Kubernetes manifest uploads (.yaml/.yml/.zip with yaml) are validated in memory against the strict sandbox
+    #    BEFORE anything is stored. Only the sanitized resources (manifest_json) are ever deployed, never the raw bytes.
+    upload_type = ext.lstrip(".")
     status, manifest_json, validation_json = "registered", None, None
-    if manifests.has_manifest_candidates(meta["upload_type"], f["data"]):
-        result = manifests.analyze(meta["upload_type"], f["data"])
+    if manifests.has_manifest_candidates(upload_type, f["data"]):
+        result = manifests.analyze(upload_type, f["data"])
         status = "validated" if result["valid"] else "invalid"
         manifest_json = json.dumps({"resources": result["resources"]}) if result["valid"] else None
         validation_json = json.dumps({k: result[k] for k in ("valid", "errors", "warnings", "workloads")})
+
+    # 3. Store the original bytes (kept for reference / download; invalid uploads can never be deployed).
+    try:
+        meta = uploads.store(req.user["id"], f["filename"], f["data"], ext)
+    except uploads.UploadError as e:
+        raise HttpError(e.status, str(e))
 
     try:
         with db.session() as conn:
@@ -211,7 +220,9 @@ def delete_application(req):
             raise HttpError(409, "This application is the shared Live demo. Remove its id from CHAOSLAB_SHARED_APP_ID on the server first.")
         if row["status"] == "deploying":
             raise HttpError(409, "Deployment is still in progress. Try again in a moment.")
-        if row["status"] in ("deployed", "deploy_failed") or row["namespace"]:
+        # Only sandbox deployments own a cl-app-<id> namespace. A connected-cluster app's `namespace` is the
+        # customer's own namespace: it is never touched (and the server's kubectl is never involved).
+        if not row["cluster_id"] and (row["status"] in ("deployed", "deploy_failed") or row["namespace"]):
             try:                                  # never leave a sandbox namespace running without an owner
                 deployments.undeploy(row["id"], uid)
             except deployments.DeployRejected as e:

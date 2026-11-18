@@ -159,7 +159,9 @@ evidence each job collected; the Oracle verdict is computed by the server and sh
 What the setup does for security: the app listens on localhost only behind Caddy (HTTPS, HSTS, 12 MB request cap);
 it runs as an unprivileged `chaoslab` user with a read-only code directory and systemd sandboxing; cookies are
 `Secure`; client IPs come from Caddy only; S3 access is via the instance role (no keys on disk); Live execution and
-sandbox deploys are **off** on the server (there is no cluster there).
+sandbox deploys are **off** on the server. Deploying user uploads requires a separate, isolated tenant cluster (gVisor or
+Kata on dedicated nodes, admission policies, least-privilege credentials): see [tenant/README.md](tenant/README.md). Never
+point the web app at the demo cluster for that.
 
 ## Troubleshooting
 * **Browser can't connect**: check the security group allows 80 and 443 from anywhere; `sudo systemctl status caddy`.

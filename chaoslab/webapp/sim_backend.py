@@ -121,6 +121,8 @@ def _build_evidence(service: str, fault_id: str, p: Dict[str, Any], probe_type: 
         "recovered_ready_replicas": 1,
         "recovery_time_seconds": p["recovery"],
         "total_recovery_seconds": round(p["recovery"] + 2.0, 1),
+        "recovery_measured": True,                 # "measured" by the simulation: the whole result is labelled SIMULATED
+        "simulated": True,
         "application": {
             "enabled": True, "probe_type": probe_type, "health_check_passed": True,
             "health_status": "SERVING" if grpc else 200,

@@ -7,53 +7,12 @@ import unittest
 import yaml
 
 from harness import Client
+from fake_tenant import FakeTenantCluster, configure_isolated, restore
 from test_experiments import wait_done
 from test_manifests import dep, svc
 
 
-class FakeCluster:
-    """Minimal kubectl stand-in: tracks namespaces / deployments created through `kubectl apply`."""
-
-    def __init__(self):
-        self.namespaces = {}          # name -> {"labels": {...}, "docs": [...]}
-        self.never_ready = False      # simulate ImagePullBackOff
-        self.calls = []
-
-    def kubectl(self, args, input_text=None, timeout=30):
-        self.calls.append(list(args))
-        if args[:2] == ["apply", "-f"]:
-            for doc in yaml.safe_load_all(input_text):
-                if doc["kind"] == "Namespace":
-                    self.namespaces[doc["metadata"]["name"]] = {"labels": doc["metadata"]["labels"], "docs": []}
-                else:
-                    self.namespaces[doc["metadata"]["namespace"]]["docs"].append(doc)
-            return True, "applied"
-        if args[:2] == ["get", "deployments"] and "-n" in args:
-            ns = args[args.index("-n") + 1]
-            items = [{"metadata": {"name": d["metadata"]["name"]},
-                      "status": {"readyReplicas": 0 if self.never_ready else d["spec"]["replicas"]}}
-                     for d in self.namespaces.get(ns, {"docs": []})["docs"] if d["kind"] == "Deployment"]
-            return True, json.dumps({"items": items})
-        if args[:2] == ["get", "pods"]:
-            return True, json.dumps({"items": [{"metadata": {"name": "web-1"}, "status": {"containerStatuses": [
-                {"name": "c", "state": {"waiting": {"reason": "ImagePullBackOff", "message": "pull access denied"}}}]}}]})
-        if args[:2] == ["get", "namespace"]:
-            ns = self.namespaces.get(args[2])
-            if not ns:
-                return False, 'Error from server (NotFound): namespaces "x" not found'
-            return True, json.dumps({"metadata": {"labels": ns["labels"]}})
-        if args[:2] == ["delete", "namespace"]:
-            self.namespaces.pop(args[2], None)
-            return True, "deleted"
-        return False, f"unexpected kubectl call: {args}"
-
-    def query_cluster(self):
-        out = {}
-        for name, ns in self.namespaces.items():
-            out[name] = [{"deployment": d["metadata"]["name"], "app_label": d["spec"]["selector"]["matchLabels"].get("app"),
-                          "replicas": d["spec"]["replicas"], "ready": d["spec"]["replicas"]}
-                         for d in ns["docs"] if d["kind"] == "Deployment"]
-        return out
+FakeCluster = FakeTenantCluster       # kept for older imports
 
 
 def manifest_bytes(*docs):
@@ -65,15 +24,18 @@ class DeployTests(unittest.TestCase):
         from webapp import catalog, config, deployments, k8s_deploy
         from webapp.live_backend import _capability_cache
         from webapp import db
+        import harness
+        harness.start()                  # initialises the DB when this module runs on its own
         with db.session() as conn:       # the test DB is shared: drop deployments left by earlier tests (global cap)
             conn.execute("UPDATE applications SET status = 'validated', namespace = NULL, deployed_at = NULL "
                          "WHERE status IN ('deploying', 'deployed', 'deploy_failed')")
-        self.fake = FakeCluster()
-        self.saved = (k8s_deploy.kubectl, catalog._query_cluster, config.DISCOVERY_ENABLED, config.DEPLOY_ENABLED,
+        self.fake = FakeTenantCluster()
+        self.saved = (k8s_deploy.kubectl, catalog._query_cluster, config.DISCOVERY_ENABLED,
                       config.DEPLOY_TIMEOUT_SECONDS, config.MAX_DEPLOYED_PER_USER)
+        self.saved_tenant = configure_isolated()
         k8s_deploy.kubectl = self.fake.kubectl
         catalog._query_cluster = self.fake.query_cluster
-        config.DISCOVERY_ENABLED, config.DEPLOY_ENABLED, config.DEPLOY_TIMEOUT_SECONDS = True, True, 1
+        config.DISCOVERY_ENABLED, config.DEPLOY_TIMEOUT_SECONDS = True, 1
         catalog._cache.update(at=0.0, data=None)
         _capability_cache.update(at=9e12, value={"available": True, "reason": "fake cluster"})
         self.c = Client()
@@ -82,8 +44,9 @@ class DeployTests(unittest.TestCase):
     def tearDown(self):
         from webapp import catalog, config, k8s_deploy
         from webapp.live_backend import _capability_cache
-        (k8s_deploy.kubectl, catalog._query_cluster, config.DISCOVERY_ENABLED, config.DEPLOY_ENABLED,
+        (k8s_deploy.kubectl, catalog._query_cluster, config.DISCOVERY_ENABLED,
          config.DEPLOY_TIMEOUT_SECONDS, config.MAX_DEPLOYED_PER_USER) = self.saved
+        restore(self.saved_tenant)
         catalog._cache.update(at=0.0, data=None)
         _capability_cache.update(at=0.0, value=None)
 
@@ -137,7 +100,7 @@ class DeployTests(unittest.TestCase):
         labels = cluster_ns["labels"]
         self.assertEqual(labels["chaoslab.io/managed-by"], "chaoslab-online")
         self.assertEqual(labels["chaoslab.io/app-id"], str(app["id"]))
-        self.assertEqual(labels["pod-security.kubernetes.io/enforce"], "baseline")
+        self.assertEqual(labels["pod-security.kubernetes.io/enforce"], "restricted")
         kinds = [d["kind"] for d in cluster_ns["docs"]]
         for needed in ("ResourceQuota", "LimitRange", "NetworkPolicy", "Deployment", "Service"):
             self.assertIn(needed, kinds)
@@ -148,6 +111,16 @@ class DeployTests(unittest.TestCase):
         self.assertIs(pod["enableServiceLinks"], False)
         self.assertEqual(pod["securityContext"]["seccompProfile"]["type"], "RuntimeDefault")
         self.assertIs(pod["containers"][0]["securityContext"]["allowPrivilegeEscalation"], False)
+        self.assertEqual(pod["runtimeClassName"], "gvisor")
+        self.assertEqual(pod["nodeSelector"], {"chaoslab.io/tenant-pool": "true"})
+        self.assertEqual(pod["containers"][0]["securityContext"]["capabilities"], {"drop": ["ALL"]})
+        self.assertIs(pod["containers"][0]["securityContext"]["runAsNonRoot"], True)
+        self.assertEqual(pod["containers"][0]["image"], "docker.io/library/nginx:1.27-alpine")
+        self.assertEqual(set(pod["containers"][0]["resources"]["limits"]), {"cpu", "memory"})
+        # the admission canary ran (and was denied) before the workloads were applied
+        dry = [i for i, c in enumerate(self.fake.calls) if "--dry-run=server" in c]
+        applies = [i for i, c in enumerate(self.fake.calls) if c[:2] == ["apply", "-f"]]
+        self.assertTrue(dry and applies[0] < dry[0] < applies[1])
         netpol = next(d for d in cluster_ns["docs"] if d["kind"] == "NetworkPolicy")
         self.assertEqual(netpol["spec"]["policyTypes"], ["Ingress", "Egress"])
         # discovery now sees it from the cluster
@@ -176,13 +149,14 @@ class DeployTests(unittest.TestCase):
         self.assertIn(f"cl-app-{app['id']}", self.fake.namespaces)        # untouched
 
     def test_cluster_unavailable_or_disabled(self):
-        from webapp import config
-        from webapp.live_backend import _capability_cache
+        from webapp import config, tenant_isolation
         app = self.upload(dep())
-        _capability_cache.update(at=9e12, value={"available": False, "reason": "no cluster"})
+        self.fake.runtime_class = False                       # the sandbox runtime disappeared
+        tenant_isolation.reset_cache()
         s, d, _ = self.deploy(app["id"])
-        self.assertEqual((s, "no cluster" in d["error"]), (503, True))
-        _capability_cache.update(at=9e12, value={"available": True, "reason": "ok"})
+        self.assertEqual((s, "isolated tenant runtime" in d["error"], "RuntimeClass" in d["error"]), (503, True, True))
+        self.fake.runtime_class = True
+        tenant_isolation.reset_cache()
         config.DEPLOY_ENABLED = False
         self.assertEqual(self.deploy(app["id"])[0], 503)
         self.assertEqual(self.fake.namespaces, {})

@@ -10,14 +10,13 @@ exactly what was validated. Nothing here talks to the cluster.
 """
 
 import copy
-import io
 import re
-import zipfile
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from . import config
+from . import archive_guard, config
 
 MAX_FILES = 50
 MAX_FILE_BYTES = 512 * 1024
@@ -29,6 +28,20 @@ MAX_CONFIGMAP_BYTES = 256 * 1024
 MAX_CPU_MILLIS = 1000                  # per container limit
 MAX_MEMORY_BYTES = 1024 ** 3           # per container limit (1Gi)
 RESERVED_PREFIXES = ("chaoslab.io/", "pod-security.kubernetes.io/", "kubernetes.io/", "k8s.io/")
+RESERVED_DOMAINS = ("chaoslab.io", "kubernetes.io", "k8s.io")       # and their subdomains...
+ALLOWED_DOMAIN_LABELS = ("app.kubernetes.io/",)                      # ...except the recommended app labels
+RESERVED_NAME_PREFIXES = ("chaoslab-", "kube-")                  # platform guard rails, kube-root-ca.crt, ...
+RESERVED_NAMES = {"default"}
+MAX_YAML_DEPTH = 32
+PARSE_BUDGET_SECONDS = 5.0
+MAX_ENV = 100
+MAX_ARGS = 100
+MAX_ARG_CHARS = 4096
+MAX_EMPTYDIR_BYTES = 256 * 1024 ** 2
+MAX_GRACE_SECONDS = 60
+MAX_SERVICE_PORTS = 10
+MAX_UID = 2 ** 31 - 1
+ENV_NAME = re.compile(r"^[-._a-zA-Z][-._a-zA-Z0-9]{0,127}$")
 
 DNS_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
 LABEL_KEY = re.compile(r"^([a-z0-9.-]{1,253}/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$")
@@ -57,8 +70,9 @@ SCHEMAS: Dict[str, Dict[str, Any]] = {
             "replicas": ANY, "selector": {"matchLabels": ANY},
             "template": {"metadata": {"labels": ANY},
                          "spec": {"containers": [_CONTAINER], "terminationGracePeriodSeconds": ANY,
-                                  "volumes": [{"name": ANY, "emptyDir": ANY,
-                                               "configMap": {"name": ANY, "items": ANY, "defaultMode": ANY}}]}},
+                                  "volumes": [{"name": ANY, "emptyDir": {"sizeLimit": ANY},
+                                               "configMap": {"name": ANY, "items": [{"key": ANY, "path": ANY}],
+                                                             "defaultMode": ANY}}]}},
         },
     },
     "Service": {
@@ -95,9 +109,11 @@ def extract_texts(ext: str, data: bytes, errors: List[str]) -> List[Tuple[str, s
         return [("manifest", text)] if text is not None else []
     out: List[Tuple[str, str]] = []
     total = 0
+    budget = archive_guard.Budget(max_bytes=MAX_TOTAL_BYTES + MAX_FILE_BYTES)
     try:
-        with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            members = [i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith((".yaml", ".yml"))]
+        zf, infos = archive_guard.zip_entries(data)
+        with zf:
+            members = [i for i in infos if not i.is_dir() and i.filename.lower().endswith((".yaml", ".yml"))]
             if len(members) > MAX_FILES:
                 errors.append(f"Too many manifest files in the archive (max {MAX_FILES}).")
                 return []
@@ -105,11 +121,11 @@ def extract_texts(ext: str, data: bytes, errors: List[str]) -> List[Tuple[str, s
                 if info.file_size > MAX_FILE_BYTES:
                     errors.append(f"{info.filename}: larger than {MAX_FILE_BYTES // 1024} KB.")
                     continue
-                with zf.open(info) as fh:
-                    raw = fh.read(MAX_FILE_BYTES + 1)          # bounded read: header sizes can lie
-                if len(raw) > MAX_FILE_BYTES:
-                    errors.append(f"{info.filename}: larger than {MAX_FILE_BYTES // 1024} KB.")
-                    continue
+                if total + info.file_size > MAX_TOTAL_BYTES:
+                    errors.append("Archive manifests exceed the total size limit.")
+                    return []
+                # bounded read: header sizes can lie, so stop at the per-file limit whatever the header says
+                raw = archive_guard.read_zip_member(zf, info, budget, MAX_FILE_BYTES)
                 total += len(raw)
                 if total > MAX_TOTAL_BYTES:
                     errors.append("Archive manifests exceed the total size limit.")
@@ -117,8 +133,9 @@ def extract_texts(ext: str, data: bytes, errors: List[str]) -> List[Tuple[str, s
                 text = _decode(raw, info.filename, errors)
                 if text is not None:
                     out.append((info.filename, text))
-    except zipfile.BadZipFile:
-        errors.append("Not a valid ZIP archive.")
+    except archive_guard.ArchiveRejected as e:
+        errors.append(str(e))
+        return []
     return out
 
 
@@ -129,19 +146,41 @@ def has_manifest_candidates(ext: str, data: bytes) -> bool:
     if ext != "zip":
         return False
     try:
-        with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            return any(not i.is_dir() and i.filename.lower().endswith((".yaml", ".yml")) for i in zf.infolist())
-    except zipfile.BadZipFile:
+        zf, infos = archive_guard.zip_entries(data)
+    except archive_guard.ArchiveRejected:
         return False
+    with zf:
+        return any(not i.is_dir() and i.filename.lower().endswith((".yaml", ".yml")) for i in infos)
+
+
+def _yaml_precheck(text: str, deadline: float) -> Optional[str]:
+    """Stream the YAML events once (iterative, no object construction): reject aliases/anchors ("billion laughs"),
+    nesting deeper than MAX_YAML_DEPTH (the composer is recursive) and slow inputs. -> reason or None."""
+    depth = 0
+    for i, ev in enumerate(yaml.parse(text, Loader=yaml.SafeLoader)):
+        if isinstance(ev, yaml.AliasEvent) or getattr(ev, "anchor", None):
+            return "YAML aliases/anchors are not allowed."
+        if isinstance(ev, (yaml.MappingStartEvent, yaml.SequenceStartEvent)):
+            depth += 1
+            if depth > MAX_YAML_DEPTH:
+                return f"YAML is nested deeper than {MAX_YAML_DEPTH} levels."
+        elif isinstance(ev, (yaml.MappingEndEvent, yaml.SequenceEndEvent)):
+            depth -= 1
+        if i % 512 == 0 and time.monotonic() > deadline:
+            return "manifest took too long to parse."
+    return None
 
 
 def parse_documents(texts: List[Tuple[str, str]], errors: List[str]) -> List[Tuple[str, Dict[str, Any]]]:
     docs: List[Tuple[str, Dict[str, Any]]] = []
+    deadline = time.monotonic() + PARSE_BUDGET_SECONDS
     for name, text in texts:
         try:
-            # Anchors/aliases allow exponential expansion ("billion laughs"); no real manifest needs them here.
-            if any(isinstance(ev, yaml.AliasEvent) for ev in yaml.parse(text, Loader=yaml.SafeLoader)):
-                errors.append(f"{name}: YAML aliases/anchors are not allowed.")
+            reason = _yaml_precheck(text, deadline)
+            if reason:
+                errors.append(f"{name}: {reason}")
+                if "too long" in reason:
+                    break
                 continue
             for doc in yaml.safe_load_all(text):
                 if doc is None:
@@ -154,7 +193,9 @@ def parse_documents(texts: List[Tuple[str, str]], errors: List[str]) -> List[Tup
                 else:
                     docs.append((name, doc))
         except yaml.YAMLError as e:
-            errors.append(f"{name}: invalid YAML ({str(e).splitlines()[0][:120]}).")
+            errors.append(f"{name}: invalid YAML ({(str(e).splitlines() or ['parse error'])[0][:120]}).")
+        except (RecursionError, MemoryError, ValueError, TypeError, OverflowError):
+            errors.append(f"{name}: the YAML could not be parsed safely.")
         if len(docs) > MAX_DOCS:
             errors.append(f"Too many YAML documents (max {MAX_DOCS}).")
             break
@@ -224,6 +265,15 @@ def _check_image(image: Any, where: str, errors: List[str]) -> None:
         errors.append(f"{where}: image '{image}' must pin an explicit tag (not 'latest') or a digest.")
 
 
+def _reserved_key(key: str) -> bool:
+    """Platform-owned label domains (chaoslab.io, kubernetes.io, k8s.io and subdomains such as
+    pod-security.kubernetes.io or node-role.kubernetes.io), except app.kubernetes.io/*."""
+    if key.startswith(ALLOWED_DOMAIN_LABELS) or "/" not in key:
+        return key.startswith(RESERVED_PREFIXES)
+    domain = key.split("/", 1)[0]
+    return any(domain == d or domain.endswith("." + d) for d in RESERVED_DOMAINS)
+
+
 def _labels_ok(labels: Any, where: str, errors: List[str]) -> Dict[str, str]:
     if labels is None:
         return {}
@@ -235,7 +285,7 @@ def _labels_ok(labels: Any, where: str, errors: List[str]) -> Dict[str, str]:
         k, v = str(k), "" if v is None else str(v)
         if not LABEL_KEY.match(k) or not LABEL_VAL.match(v):
             errors.append(f"{where}: invalid label '{k}: {v}'.")
-        elif k.startswith(RESERVED_PREFIXES):
+        elif _reserved_key(k):
             errors.append(f"{where}: label key '{k}' uses a reserved prefix.")
         else:
             clean[k] = v
@@ -246,21 +296,62 @@ def _int_in(v: Any, lo: int, hi: int) -> bool:
     return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
 
 
+def _validate_security_context(sc: Dict[str, Any], where: str, errors: List[str]) -> None:
+    """Only hardening is accepted from the user; the platform forces the rest (non-root, no escalation,
+    drop ALL capabilities, seccomp RuntimeDefault) at deploy time."""
+    if "runAsUser" in sc and not _int_in(sc["runAsUser"], 1, MAX_UID):
+        errors.append(f"{where}.runAsUser: must be a non-root user id (1-{MAX_UID}); containers never run as root.")
+    if "runAsGroup" in sc and not _int_in(sc["runAsGroup"], 0, MAX_UID):
+        errors.append(f"{where}.runAsGroup: must be 0-{MAX_UID}.")
+    if "runAsNonRoot" in sc and sc["runAsNonRoot"] is not True:
+        errors.append(f"{where}.runAsNonRoot: must be true (containers never run as root).")
+    if "allowPrivilegeEscalation" in sc and sc["allowPrivilegeEscalation"] is not False:
+        errors.append(f"{where}.allowPrivilegeEscalation: must be false.")
+    if "readOnlyRootFilesystem" in sc and not isinstance(sc["readOnlyRootFilesystem"], bool):
+        errors.append(f"{where}.readOnlyRootFilesystem: must be true or false.")
+
+
+def _validate_probe(p: Any, where: str, errors: List[str]) -> None:
+    if p is None:
+        return
+    for k in ("initialDelaySeconds", "periodSeconds", "timeoutSeconds", "failureThreshold", "successThreshold"):
+        if k in p and not _int_in(p[k], 0 if k == "initialDelaySeconds" else 1, 600):
+            errors.append(f"{where}.{k}: must be an integer up to 600.")
+    kinds = [k for k in ("httpGet", "tcpSocket") if k in p]
+    if len(kinds) != 1:
+        errors.append(f"{where}: needs exactly one of httpGet or tcpSocket (exec probes are not allowed).")
+        return
+    h = p[kinds[0]] or {}
+    port = h.get("port")
+    if not (_int_in(port, 1, 65535) or (isinstance(port, str) and DNS_LABEL.match(port))):
+        errors.append(f"{where}.{kinds[0]}.port: must be a port number or name.")
+    if kinds[0] == "httpGet":
+        if h.get("scheme", "HTTP") not in ("HTTP", "HTTPS"):
+            errors.append(f"{where}.httpGet.scheme: must be HTTP or HTTPS.")
+        if "path" in h and not (isinstance(h["path"], str) and h["path"].startswith("/") and len(h["path"]) <= 200):
+            errors.append(f"{where}.httpGet.path: must be an absolute path.")
+
+
 def _validate_container(c: Dict[str, Any], where: str, volumes: Dict[str, str], configmaps: set,
                         errors: List[str]) -> None:
     name = c.get("name")
     if not isinstance(name, str) or not DNS_LABEL.match(name):
         errors.append(f"{where}.name: must be a DNS label (lowercase letters, digits, '-').")
     _check_image(c.get("image"), f"{where}.image", errors)
-    if c.get("imagePullPolicy") not in (None, "IfNotPresent", "Always", "Never"):
-        errors.append(f"{where}.imagePullPolicy: must be IfNotPresent, Always or Never.")
+    if c.get("imagePullPolicy") not in (None, "IfNotPresent", "Always"):
+        # "Never" would run whatever image is cached on the node; tenant images are always pulled at deploy time.
+        errors.append(f"{where}.imagePullPolicy: must be IfNotPresent or Always (images are always pulled from "
+                      "the registry in the sandbox).")
     for key in ("command", "args"):
-        if key in c and not (isinstance(c[key], list) and all(isinstance(x, str) for x in c[key])):
-            errors.append(f"{where}.{key}: must be a list of strings.")
-    for i, e in enumerate(c.get("env") or []):
+        if key in c and not (isinstance(c[key], list) and len(c[key]) <= MAX_ARGS
+                             and all(isinstance(x, str) and len(x) <= MAX_ARG_CHARS for x in c[key])):
+            errors.append(f"{where}.{key}: must be a list of at most {MAX_ARGS} strings.")
+    if len(c.get("env") or []) > MAX_ENV:
+        errors.append(f"{where}.env: at most {MAX_ENV} variables.")
+    for i, e in enumerate((c.get("env") or [])[:MAX_ENV]):
         w = f"{where}.env[{i}]"
-        if not isinstance(e.get("name"), str) or not e["name"]:
-            errors.append(f"{w}.name: required string.")
+        if not isinstance(e.get("name"), str) or not ENV_NAME.match(e["name"]):
+            errors.append(f"{w}.name: required, letters/digits/'_'/'-'/'.' (max 128).")
         if "value" in e and not isinstance(e["value"], str):
             errors.append(f"{w}.value: must be a string (quote numbers and booleans).")
         ref = ((e.get("valueFrom") or {}).get("configMapKeyRef") or {})
@@ -288,9 +379,9 @@ def _validate_container(c: Dict[str, Any], where: str, volumes: Dict[str, str], 
         extra = set((res.get(section) or {}).keys()) - {"cpu", "memory"}
         if extra:
             errors.append(f"{where}.resources.{section}: only cpu and memory are allowed ({', '.join(sorted(extra))}).")
-    sc = c.get("securityContext") or {}
-    if sc.get("allowPrivilegeEscalation") is True:
-        errors.append(f"{where}.securityContext.allowPrivilegeEscalation: must not be true.")
+    _validate_security_context(c.get("securityContext") or {}, f"{where}.securityContext", errors)
+    for probe in ("readinessProbe", "livenessProbe", "startupProbe"):
+        _validate_probe(c.get(probe), f"{where}.{probe}", errors)
     for i, m in enumerate(c.get("volumeMounts") or []):
         if m.get("name") not in volumes:
             errors.append(f"{where}.volumeMounts[{i}]: volume '{m.get('name')}' is not defined.")
@@ -308,6 +399,8 @@ def _validate_deployment(doc: Dict[str, Any], configmaps: set, errors: List[str]
         errors.append(f"{where}.spec.replicas: must be between 1 and {config.MAX_REPLICAS}.")
     tmpl = spec.get("template") or {}
     pod = tmpl.get("spec") or {}
+    if "terminationGracePeriodSeconds" in pod and not _int_in(pod["terminationGracePeriodSeconds"], 0, MAX_GRACE_SECONDS):
+        errors.append(f"{where}.terminationGracePeriodSeconds: must be 0-{MAX_GRACE_SECONDS}.")
     containers = pod.get("containers")
     if not isinstance(containers, list) or not 1 <= len(containers) <= MAX_CONTAINERS:
         errors.append(f"{where}: needs between 1 and {MAX_CONTAINERS} containers.")
@@ -323,8 +416,26 @@ def _validate_deployment(doc: Dict[str, Any], configmaps: set, errors: List[str]
             errors.append(f"{where}.volumes[{i}]: must be exactly one of emptyDir or configMap (hostPath, secrets, PVCs etc. are not allowed).")
             continue
         volumes[vname] = kinds[0]
-        if kinds[0] == "configMap" and (v["configMap"] or {}).get("name") not in configmaps:
-            errors.append(f"{where}.volumes[{i}]: ConfigMap '{(v['configMap'] or {}).get('name')}' is not part of this upload.")
+        if kinds[0] == "emptyDir":
+            size = (v["emptyDir"] or {}).get("sizeLimit")
+            try:
+                ok_size = size is None or 0 < _mem_bytes(size) <= MAX_EMPTYDIR_BYTES
+            except (ValueError, TypeError):
+                ok_size = False
+            if not ok_size:
+                errors.append(f"{where}.volumes[{i}].emptyDir.sizeLimit: up to {MAX_EMPTYDIR_BYTES // 1024 ** 2}Mi "
+                              "(medium: Memory is not allowed).")
+        if kinds[0] == "configMap":
+            cm = v["configMap"] or {}
+            if cm.get("name") not in configmaps:
+                errors.append(f"{where}.volumes[{i}]: ConfigMap '{cm.get('name')}' is not part of this upload.")
+            if "defaultMode" in cm and not _int_in(cm["defaultMode"], 0, 0o755):
+                errors.append(f"{where}.volumes[{i}].configMap.defaultMode: must be 0-0755.")
+            for j, it in enumerate(cm.get("items") or []):
+                pth = it.get("path")
+                if not isinstance(it.get("key"), str) or not isinstance(pth, str) or not pth or pth.startswith("/") \
+                        or ".." in pth.split("/"):
+                    errors.append(f"{where}.volumes[{i}].configMap.items[{j}]: needs a key and a relative path.")
     seen = set()
     for i, c in enumerate(containers):
         if isinstance(c, dict):
@@ -363,8 +474,8 @@ def _validate_service(doc: Dict[str, Any], errors: List[str]) -> None:
     else:
         spec["selector"] = _labels_ok(sel, f"{where}.selector", errors)
     ports = spec.get("ports")
-    if not isinstance(ports, list) or not ports:
-        errors.append(f"{where}.spec.ports: at least one port is required.")
+    if not isinstance(ports, list) or not 1 <= len(ports) <= MAX_SERVICE_PORTS:
+        errors.append(f"{where}.spec.ports: between 1 and {MAX_SERVICE_PORTS} ports are required.")
         return
     for i, p in enumerate(ports):
         if not _int_in(p.get("port"), 1, 65535):
@@ -404,7 +515,11 @@ def analyze(ext: str, data: bytes) -> Dict[str, Any]:
     warnings: List[str] = []
     result: Dict[str, Any] = {"valid": False, "errors": errors, "warnings": warnings, "resources": [], "workloads": []}
 
-    docs = parse_documents(extract_texts(ext, data, errors), errors)
+    try:
+        docs = parse_documents(extract_texts(ext, data, errors), errors)
+    except (archive_guard.ArchiveRejected, RecursionError, MemoryError) as e:
+        errors.append(str(e) if isinstance(e, archive_guard.ArchiveRejected) else "The upload could not be parsed safely.")
+        docs = []
     if not docs and not errors:
         errors.append("No Kubernetes resources found. Upload Deployment/Service/ConfigMap manifests.")
     if len(docs) > MAX_RESOURCES:
@@ -424,6 +539,10 @@ def analyze(ext: str, data: bytes) -> Dict[str, Any]:
         name = (meta or {}).get("name") if isinstance(meta, dict) else None
         if not isinstance(name, str) or not DNS_LABEL.match(name):
             errors.append(f"{src}: {kind} needs a metadata.name that is a DNS label (lowercase letters, digits, '-').")
+            continue
+        if name.startswith(RESERVED_NAME_PREFIXES) or name in RESERVED_NAMES:
+            errors.append(f"{kind}/{name}: names starting with {' or '.join(RESERVED_NAME_PREFIXES)} (and "
+                          f"{', '.join(sorted(RESERVED_NAMES))}) are reserved for the platform.")
             continue
         n_before = len(errors)
         _check_schema(raw, SCHEMAS[kind], f"{kind}/{name}", errors)

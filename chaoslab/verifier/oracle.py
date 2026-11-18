@@ -91,20 +91,32 @@ class FaultInjectedRule(VerificationRule):
         if not injection_attempted:
             return RuleResult(self.name, False, "Chaos injection command failed to execute.", observed=False, expected=True, status=RuleStatus.FAIL)
 
-        conditions = chaos_evidence.get("conditions", [])
-        all_injected = any(c.get("type") == "AllInjected" and c.get("status") == "True" for c in conditions)
-        container_records = chaos_evidence.get("container_records", [])
+        # A successful `kubectl apply` only proves the Chaos Mesh object was created. PASS requires POSITIVE
+        # evidence from Chaos Mesh itself: the AllInjected condition, or an Apply/Succeeded record for a target.
+        if not isinstance(chaos_evidence, dict):
+            chaos_evidence = {}
+        conditions = chaos_evidence.get("conditions") or []
+        all_injected = any(isinstance(c, dict) and c.get("type") == "AllInjected" and c.get("status") == "True"
+                           for c in conditions)
+        container_records = chaos_evidence.get("container_records") or []
         has_succeeded_event = any(
-            any(e.get("operation") == "Apply" and e.get("type") == "Succeeded" for e in r.get("events", []))
+            isinstance(r, dict) and any(isinstance(e, dict) and e.get("operation") == "Apply" and e.get("type") == "Succeeded"
+                                        for e in (r.get("events") or []))
             for r in container_records
         )
 
-        passed = all_injected or has_succeeded_event or injection_attempted
+        passed = all_injected or has_succeeded_event
         if passed:
-            msg = "Chaos Mesh confirmed fault injection (AllInjected / Apply Succeeded)."
+            confirmed = "AllInjected" if all_injected else "Apply Succeeded"
+            msg = f"Chaos Mesh confirmed fault injection ({confirmed})."
             status = RuleStatus.PASS
+        elif chaos_evidence.get("error"):
+            msg = (f"The Chaos Mesh object was created but its status could not be read "
+                   f"({str(chaos_evidence['error'])[:120]}); injection is unconfirmed.")
+            status = RuleStatus.FAIL
         else:
-            msg = "Chaos Mesh did not record a successful fault injection."
+            msg = ("The Chaos Mesh object was created (kubectl apply succeeded) but Chaos Mesh never confirmed the "
+                   "injection (no AllInjected condition, no Apply Succeeded record).")
             status = RuleStatus.FAIL
 
         return RuleResult(self.name, passed, msg, observed="Injected" if passed else "Pending/Failed", expected="Injected", status=status)
@@ -171,6 +183,14 @@ class RecoveryTimeRule(VerificationRule):
     def evaluate(self, evidence: Dict[str, Any], config: Dict[str, Any]) -> RuleResult:
         timeout_seconds = float(config.get("recovery", {}).get("timeout_seconds", 60))
         recovery_time = evidence.get("recovery_time_seconds")
+        fault_type = str(config.get("fault", {}).get("type", "pod-kill"))
+        # Network faults: older engines reported a fixed, nominal recovery value instead of a measurement. Only a
+        # value the engine marks as measured may be judged; otherwise the rule is SKIPPED (never PASS).
+        if "network" in fault_type and evidence.get("recovery_measured") is not True:
+            return RuleResult(
+                self.name, False,
+                "Recovery time was not measured for this network fault (the evidence carries no measurement).",
+                observed="not measured", expected=f"<={timeout_seconds}s", status=RuleStatus.SKIPPED)
 
         if recovery_time is None:
             return RuleResult(
@@ -183,8 +203,9 @@ class RecoveryTimeRule(VerificationRule):
             )
 
         passed = recovery_time <= timeout_seconds
+        what = (" after the network fault was removed" if "network" in fault_type else "")
         if passed:
-            msg = f"Service recovered in {recovery_time:.2f}s (within limit of {timeout_seconds}s)."
+            msg = f"Service recovered{what} in {recovery_time:.2f}s (within limit of {timeout_seconds}s)."
             status = RuleStatus.PASS
         else:
             msg = f"Recovery took {recovery_time:.2f}s, exceeding SLA limit of {timeout_seconds}s."
