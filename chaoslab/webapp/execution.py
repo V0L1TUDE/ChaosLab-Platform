@@ -30,7 +30,7 @@ STAGE_LABELS = dict(STAGES)
 
 ORACLE_GROUPS = {
     "infrastructure": ["baseline_healthy", "fault_injected", "target_impact", "service_recovery", "recovery_within_timeout"],
-    "application": ["app_health_probe", "app_functional_check", "app_logs_healthy"],
+    "application": ["app_health_probe", "app_functional_check", "application_data_persisted", "app_logs_healthy"],
     "telemetry": ["telemetry_traces_recorded", "telemetry_error_spike_detected", "telemetry_latency_recovered"],
 }
 _GROUP_OF = {rule: group for group, rules in ORACLE_GROUPS.items() for rule in rules}

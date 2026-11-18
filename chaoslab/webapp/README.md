@@ -75,7 +75,7 @@ static/ (SPA)  ->  http_core.py (router, cookies, CSRF origin check, headers)
 
 ### Reused from the existing ChaosLab project
 `verifier/engine.py` (`verify_experiment`, progress callback, Chaos Mesh manifests, recovery tracking, probes,
-telemetry), `verifier/oracle.py` (all 11 invariants and PASS/FAIL/SKIPPED/NOT_APPLICABLE semantics, used by *both*
+telemetry), `verifier/oracle.py` (12 invariants and PASS/FAIL/SKIPPED/NOT_APPLICABLE semantics, used by *both*
 modes), `verifier/reporter.py` (Live runs also expose the engine's native HTML report as `engine-html`),
 the curated experiment YAMLs in `experiments/` (their application/telemetry probes are used for Live runs of
 the matching service+fault), and the Online Boutique deployment as the demo application.
@@ -102,7 +102,7 @@ Agent API (Bearer auth, outbound from the agent): `POST /agent/v1/enroll`, `/age
 `/agent/v1/jobs/{id}/events`, `/agent/v1/jobs/{id}/result`. Credentials: enrollment token `cle_…` (one-time) → agent credential `cla_…`
 → per-job token `clj_…` (valid only for that job until its lease expires). Enrollment attempts are throttled per IP.
 Probes: `POST /api/applications/{id}/probes {service, probes|null}` stores validated declarative probes (HTTP GET health [required], functional GET, log substrings; same whitelist as the agent, with a parity test). They become the job's `application` block: the agent executes them (pre-flight before the fault, again after recovery) and the server's Oracle evaluates the app invariants from the evidence.
-Tracing: `POST /api/applications/{id}/telemetry {service, telemetry|null}` stores per-service tracing checks (traced service name, max p95, optional caller traffic during the fault, require error spans). The agent collects them from the Jaeger it was started with (`--jaeger`); collection failures make the telemetry invariants SKIP. With probes + tracing, all 11 invariants are evaluated.
+Tracing: `POST /api/applications/{id}/telemetry {service, telemetry|null}` stores per-service tracing checks (traced service name, max p95, optional caller traffic during the fault, require error spans). The agent collects them from the Jaeger it was started with (`--jaeger`); collection failures make the telemetry invariants SKIP. The agent supports 11 infrastructure/application/tracing checks. The additional persistence rule remains N/A unless a supported execution path supplies pre-fault and post-recovery record evidence.
 User API: `GET/POST /api/clusters`, `GET/DELETE /api/clusters/{id}`, `POST /api/clusters/{id}/{enrollment|emergency-stop|resume|applications}`.
 Extra tables: `clusters`, `jobs`, `audit_log`; `applications.cluster_id`, `experiments.cluster_id`.
 Env: `CHAOSLAB_PUBLIC_URL` (shown in install commands), `CHAOSLAB_AGENT_ONLINE_SECONDS` (45), `CHAOSLAB_AGENT_QUEUE_TIMEOUT_SECONDS` (120),
@@ -229,7 +229,7 @@ mode for the curated experiments that configure probes (e.g. `paymentservice` po
 `N/A` otherwise. Simulated runs evaluate all groups on predefined evidence (still `N/A` for `target_impact` on network faults).
 
 ## Remaining limitations
-* Customer clusters (agent): all 11 invariants via HTTP GET/log probes and read-only Jaeger queries (no gRPC probes; Jaeger only),
+* Customer clusters (agent): up to 11 checks via HTTP GET, gRPC health/log probes and read-only Jaeger queries (legacy and v3 APIs),
   one experiment per cluster, and evidence is only as trustworthy as the agent the customer runs. No agent auto-update,
   no mTLS/key pinning yet, and the control plane is a single process (SQLite + threads).
 * Uploaded apps must be Kubernetes manifests (Deployment/Service/ConfigMap with registry images): no Secrets, volumes beyond
@@ -253,3 +253,44 @@ mode for the curated experiments that configure probes (e.g. `paymentservice` po
 4. Teams/roles, API tokens for CI quality gates (reuse `chaoslab/gate.py`), email verification and password reset.
 5. Time-series from Prometheus/Jaeger for every Live run, scheduled experiments, trends across runs.
 6. Replace the simulation with real execution wherever possible; keep it only as a sandbox demo mode.
+
+
+## Stage 1 acceptance: real agent workflow
+
+From repository root, using the project Python environment:
+
+```sh
+python chaoslab/stage1_acceptance.py --run-local-experiment --output-dir /tmp/chaoslab-stage1-evidence
+```
+
+This command explicitly replaces **one `chaoslab-project` pod in `chaoslab-demo`**
+on Docker Desktop. Start Docker Desktop/Kubernetes and prepare the local demo with
+`python chaoslab/local.py setup-demo` first. Existing faults cause a refusal.
+
+It starts a temporary loopback instance of this hosted web application, creates an
+isolated test account, enrolls the real agent, stops and restarts it with its saved
+credential, discovers the actual Deployments, registers the namespace, configures
+HTTP health/functional and Jaeger checks, and starts a Live experiment through the
+same authenticated HTTP API used by the website. Server-local execution and
+sandbox deployment are disabled: the actual job must run via the agent.
+
+The check downloads HTML/JSON reports, requires health, functional, trace and
+latency checks to PASS, and confirms no fault resources remain. `summary.json`
+contains the result; `experiment.json` contains the monitor history. Temporary
+accounts, credentials and kubeconfig snapshots are removed on exit. Reports and
+logs in the chosen output directory remain for review. The operator's default
+Kubernetes context is preserved. The script owns only its temporary server/agent
+processes and leaves the existing dashboard running.
+
+This verifies the hosted **code path locally with a real cluster**. It does not
+prove the public HTTPS deployment, reverse proxy, its installed agent version or
+an existing site's account. Stage 1's final deployment checkpoint is a signed-in
+run on that site: enroll/reconnect an agent, discover a registered application,
+perform a reviewed Live Pod Kill in an approved namespace, download reports, and
+confirm cleanup and that the evidence is marked LIVE. Do not replace this proof
+with a Simulated run.
+
+Tracing queries use the agent operator's configured Jaeger Service, support the
+legacy query API and stable v3 OTLP stream, and keep latency spans within the
+post-recovery window and target service. Empty windows are never widened to old
+traces. Fault-window errors are analyzed separately.

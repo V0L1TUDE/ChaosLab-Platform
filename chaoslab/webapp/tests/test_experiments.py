@@ -47,10 +47,10 @@ class ExperimentTests(unittest.TestCase):
         for e in exp["events"]:
             self.assertEqual(e["simulated"], 1)
             self.assertTrue(e["message"].startswith("[SIMULATED]"), e)
-        # all 11 real Oracle invariants present, split in three groups
+        # all 12 real Oracle invariants present, split in three groups
         o = r["oracle"]
-        self.assertEqual(o["counts"]["total"], 11)
-        self.assertEqual([len(o["groups"][g]) for g in ("infrastructure", "application", "telemetry")], [5, 3, 3])
+        self.assertEqual(o["counts"]["total"], 12)
+        self.assertEqual([len(o["groups"][g]) for g in ("infrastructure", "application", "telemetry")], [5, 4, 3])
         self.assertTrue(all(rule["simulated"] for rule in o["rules"]))
         stages = [t["key"] for t in r["timeline"]]
         self.assertEqual(stages, ["baseline", "fault_injection", "impact", "recovery", "verification", "oracle", "completed"])
@@ -62,7 +62,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(rules["target_impact"]["status"], "NOT_APPLICABLE")
         self.assertEqual(rules["target_impact"]["status_label"], "N/A")
         counts = exp["result"]["oracle"]["counts"]
-        self.assertEqual(counts["na"], 1)
+        self.assertEqual(counts["na"], 2)
         self.assertEqual(counts["executed"], counts["pass"] + counts["fail"])
         self.assertLess(counts["pass"], counts["total"])
 
@@ -153,7 +153,8 @@ class ExperimentTests(unittest.TestCase):
     def test_oracle_catalog(self):
         data = self.c.get("/api/oracle/invariants")[1]
         names = [i["name"] for g in data["groups"] for i in g["invariants"]]
-        self.assertEqual(len(names), 11)
+        self.assertEqual(len(names), 12)
+        self.assertIn("application_data_persisted", names)
         self.assertEqual({s["status"] for s in data["statuses"]}, {"PASS", "FAIL", "SKIP", "N/A"})
 
 

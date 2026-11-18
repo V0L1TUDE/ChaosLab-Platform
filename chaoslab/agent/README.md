@@ -53,7 +53,7 @@ After the experiment the agent queries Jaeger **read-only** through a temporary 
 traces, p95 latency and error spans; the server's Oracle evaluates `telemetry_traces_recorded`,
 `telemetry_latency_recovered` and `telemetry_error_spike_detected`. Where Jaeger runs is decided **only** by the agent's
 flag; a job that names any endpoint is refused. If tracing cannot be collected (no `--jaeger`, Jaeger down), the three
-checks show **SKIP**, never a false PASS or FAIL. With probes and tracing configured, all 11 invariants are evaluated.
+checks show **SKIP**, never a false PASS or FAIL. With the relevant probes and tracing configured, up to 11 agent-supported invariants are evaluated; persistence is N/A on this read-only agent path.
 
 Why the caller matters: when the target pod is killed it cannot record its own errors. Its callers can: in the
 reference app, `task-service` keeps answering `200` (graceful degradation) while tracing shows the failed internal calls.
@@ -97,9 +97,14 @@ The pod runs as non-root with a read-only service-account scope and a 16 MiB vol
 | `--insecure-allow-http` | | off |
 
 ## Limitations (v1)
-* gRPC services can't be probed yet (HTTP GET and logs only); probe a gRPC app through an HTTP health endpoint if it has one.
+* gRPC probes use the standard gRPC health protocol; arbitrary gRPC methods are not supported.
 * Tracing checks support Jaeger's query API (other backends such as Tempo are not supported yet).
 * Network faults: the engine's recovery time for network chaos is nominal (see the main README); it is shown as not measured.
 * One experiment per cluster at a time; one agent per cluster.
 * Evidence is trusted to the extent the agent is trusted (the server re-runs the Oracle on it but cannot independently
   observe your cluster). Run the agent from an image/source you control.
+
+Jaeger collection supports both the legacy query API and the stable v3 OTLP stream.
+Recovery latency uses only target-service spans in the post-recovery window; old
+traces cannot satisfy an empty window. See the webapp README for the repeatable
+Stage 1 agent acceptance check.

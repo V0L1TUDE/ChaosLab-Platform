@@ -18,7 +18,7 @@ import re
 import threading
 import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import safe_probes
@@ -158,12 +158,29 @@ def _query(local_port: int, service: str, start_us: int, end_us: int) -> List[Di
     r = safe_probes.http_get(local_port, path, timeout=15, max_body=8 * 1024 * 1024)
     if "error" in r:
         raise RuntimeError(f"Jaeger query failed: {r['error']}")
+    if r["status"] == 404:
+        # Jaeger v2 serves the stable v3 OTLP stream instead of the old UI API.
+        stamp = lambda t: datetime.fromtimestamp(t / 1_000_000, timezone.utc).isoformat().replace("+00:00", "Z")
+        path = "/api/v3/traces?" + urllib.parse.urlencode({
+            "query.serviceName": service, "query.startTimeMin": stamp(start_us),
+            "query.startTimeMax": stamp(end_us), "query.searchDepth": MAX_TRACES})
+        r = safe_probes.http_get(local_port, path, timeout=15, max_body=8 * 1024 * 1024)
+        if "error" in r or r.get("status") != 200:
+            raise RuntimeError("Jaeger v3 query failed")
+        from telemetry import _otlp_traces
+        try:
+            return _otlp_traces(r["body"])
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise RuntimeError("Jaeger returned an invalid v3 trace stream") from exc
     if r["status"] != 200:
         raise RuntimeError(f"Jaeger query returned HTTP {r['status']}")
     try:
-        return json.loads(r["body"]).get("data") or []
-    except ValueError:
-        raise RuntimeError("Jaeger returned a response that is not JSON (response too large or wrong port?)")
+        payload = json.loads(r["body"])
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list) or payload.get("errors"):
+            raise ValueError("Invalid legacy trace response")
+        return payload["data"]
+    except (ValueError, TypeError):
+        raise RuntimeError("Jaeger returned an invalid trace response")
 
 
 def collect(jaeger: Optional[Tuple[str, str, int]], spec: Dict[str, Any], report: Dict[str, Any], analyze: Callable,
@@ -186,18 +203,19 @@ def collect(jaeger: Optional[Tuple[str, str, int]], spec: Dict[str, Any], report
     factory = forward_factory or safe_probes.PortForward
     try:
         with factory(ns, svc, port, kind="svc") as local_port:
-            post = _query(local_port, spec["service_name"], recovered - 2_000_000, now_us + 2_000_000)
-            if not post:                    # nothing after recovery yet: widen to the last two minutes
-                post = _query(local_port, spec["service_name"], now_us - 120_000_000, now_us + 2_000_000)
+            post = _query(local_port, spec["service_name"], recovered, now_us)
             fault_target = _query(local_port, spec["service_name"], fault_start - 1_000_000, recovered + 2_000_000)
             fault_caller: List[Dict[str, Any]] = []
             if spec.get("traffic"):
                 fault_caller = _query(local_port, spec["traffic"]["service"], fault_start - 1_000_000, recovered + 2_000_000)
     except (safe_probes.ProbeError, RuntimeError) as e:
         return {**base, "available": False, "collection_error": f"could not query Jaeger at {ns}/{svc}:{port}: {e}"}
-    analysis = analyze(post)
-    target_errors = analyze(fault_target).get("error_spans_count", 0)
-    caller_errors = analyze(fault_caller).get("error_spans_count", 0) if fault_caller else 0
+    analysis = analyze(post, target_service=spec["service_name"], start_time_us=recovered, end_time_us=now_us)
+    target_errors = analyze(fault_target, target_service=spec["service_name"],
+                            start_time_us=fault_start, end_time_us=recovered).get("error_spans_count", 0)
+    caller_errors = (analyze(fault_caller, target_service=spec["traffic"]["service"],
+                            start_time_us=fault_start, end_time_us=recovered).get("error_spans_count", 0)
+                     if fault_caller else 0)
     return {**analysis, **base, "available": True,
             "error_spans_count": target_errors + caller_errors,
             "fault_window_errors": target_errors + caller_errors,

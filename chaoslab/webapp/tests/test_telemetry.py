@@ -40,7 +40,10 @@ class FakeJaeger(http.server.BaseHTTPRequestHandler):
         if FakeJaeger.status != 200:
             self.send_response(FakeJaeger.status); self.end_headers(); return
         svc = q.get("service", [""])[0]
-        traces = [{"traceID": f"{svc}-{i}", "spans": spans} for i, spans in enumerate(FakeJaeger.data.get(svc, []))]
+        start = int(q.get("start", ["0"])[0])
+        traces = [{"traceID": f"{svc}-{i}", "processes": {"p": {"serviceName": svc}},
+                   "spans": [{**s, "processID": "p", "startTime": start + 1_000_000} for s in spans]}
+                  for i, spans in enumerate(FakeJaeger.data.get(svc, []))]
         body = json.dumps({"data": traces}).encode()
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
 
@@ -129,12 +132,12 @@ class CollectTests(unittest.TestCase):
         FakeJaeger.status = 500
         self.assertIn("HTTP 500", self.collect()["collection_error"])
 
-    def test_empty_post_window_widens_the_search(self):
+    def test_empty_post_window_does_not_widen_the_search(self):
         FakeJaeger.data = {}
         ev = self.collect()
         self.assertTrue(ev["available"])
         self.assertEqual(ev["traces_count"], 0)
-        self.assertEqual(sum(1 for q in FakeJaeger.queries if q["service"] == "project-service"), 3)  # post, widened, fault
+        self.assertEqual(sum(1 for q in FakeJaeger.queries if q["service"] == "project-service"), 2)  # post and fault, never an old window
 
 
 class TrafficTests(unittest.TestCase):
@@ -269,7 +272,7 @@ class ServerTelemetryTests(unittest.TestCase):
 
     def test_slow_recovery_and_invisible_fault_fail(self):
         self.set_tel({"max_allowed_p95_ms": 100, "verify_error_spike": True, "traffic": {"service": "api", "port": 8080, "path": "/x"}})
-        _, exp = self.run_with(self.good_evidence(error_spans_count=0, latency_ms={"p95": 900}))
+        _, exp = self.run_with(self.good_evidence(error_spans_count=0, fault_window_errors=0, latency_ms={"p95": 900}))
         r = self.rules(exp)
         self.assertEqual((r["telemetry_error_spike_detected"], r["telemetry_latency_recovered"]), ("FAIL", "FAIL"))
         self.assertEqual(exp["oracle_verdict"], "FAIL")
@@ -414,3 +417,58 @@ class TrafficPreflightExecutorTests(unittest.TestCase):
         self.assertEqual(self.stub.runs, 1)
         self.assertIn("report", out)
         self.assertTrue(any("Pre-flight traffic check passed" in e[1] for e in self.events))
+
+
+class HostedWorkflowTracingTests(unittest.TestCase):
+    def test_v3_only_jaeger_normalizes_real_otlp_span(self):
+        from unittest.mock import patch
+        envelope = {"result": {"resourceSpans": [{
+            "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "project-service"}}]},
+            "scopeSpans": [{"spans": [{"traceId": "a" * 32, "spanId": "b" * 16,
+                "name": "GET /projects", "kind": 2, "startTimeUnixNano": "1000000000",
+                "endTimeUnixNano": "1009000000"}]}]}]}}
+        replies = [{"status": 404, "body": ""}, {"status": 200, "body": json.dumps(envelope)}]
+        with patch.object(safe_telemetry.safe_probes, "http_get", side_effect=replies) as get:
+            traces = safe_telemetry._query(1234, "project-service", 1_000_000, 2_000_000)
+        self.assertIn("/api/v3/traces?", get.call_args.args[1])
+        self.assertIn("query.serviceName=project-service", get.call_args.args[1])
+        analysis = ANALYZE(traces, target_service="project-service")
+        self.assertEqual(analysis["traces_count"], 1)
+        self.assertEqual(analysis["latency_ms"]["p95"], 9)
+
+    def test_empty_recovery_window_never_widens_to_old_traces(self):
+        from unittest.mock import patch
+        with patch.object(safe_telemetry, "_query", return_value=[]) as query:
+            result = safe_telemetry.collect(("obs", "jaeger", 16686),
+                {"service_name": "project-service"}, REPORT, ANALYZE,
+                forward_factory=forward_to(1234), now_us=1767225640_000000)
+        self.assertEqual(query.call_args_list[0].args[2], safe_telemetry._iso_us(REPORT["timestamps"]["replacement_ready"]))
+        self.assertEqual(query.call_count, 2)  # recovery and fault windows only
+        self.assertEqual(result["traces_count"], 0)
+
+    def test_v3_error_stream_is_unavailable_evidence(self):
+        from unittest.mock import patch
+        replies = [{"status": 404, "body": ""},
+                   {"status": 200, "body": json.dumps({"error": {"message": "backend unavailable"}})}]
+        with patch.object(safe_telemetry.safe_probes, "http_get", side_effect=replies):
+            result = safe_telemetry.collect(("obs", "jaeger", 16686),
+                {"service_name": "project-service"}, REPORT, ANALYZE,
+                forward_factory=forward_to(1234), now_us=1767225640_000000)
+        self.assertFalse(result["available"])
+        self.assertIn("invalid v3", result["collection_error"])
+
+    def test_recovery_latency_excludes_other_services_and_old_spans(self):
+        from unittest.mock import patch
+        recovered = safe_telemetry._iso_us(REPORT["timestamps"]["replacement_ready"])
+        traces = [{"traceID": "a" * 32, "processes": {
+            "target": {"serviceName": "project-service"}, "other": {"serviceName": "user-service"}},
+            "spans": [
+                {**span(10), "processID": "target", "startTime": recovered + 1_000_000},
+                {**span(5000), "processID": "other", "startTime": recovered + 1_000_000},
+                {**span(9000), "processID": "target", "startTime": recovered - 1_000_000}]}]
+        with patch.object(safe_telemetry, "_query", return_value=traces):
+            result = safe_telemetry.collect(("obs", "jaeger", 16686),
+                {"service_name": "project-service"}, REPORT, ANALYZE,
+                forward_factory=forward_to(1234), now_us=recovered + 2_000_000)
+        self.assertEqual(result["spans_count"], 1)
+        self.assertEqual(result["latency_ms"]["p95"], 10)
