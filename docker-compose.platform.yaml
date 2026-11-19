@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # ChaosLab SaaS Control Plane & Hosted Web Dashboard
+  chaoslab-platform:
+    build:
+      context: .
+      dockerfile: Dockerfile.platform
+    container_name: chaoslab-platform
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - CHAOSLAB_PORT=8000
+      - CHAOSLAB_DB_PATH=/app/data/chaoslab_platform.db
+      - CHAOSLAB_JWT_SECRET=production-secret-encryption-key-for-chaoslab
+    volumes:
+      - platform-data:/app/data
+      - platform-reports:/app/chaoslab/reports
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  platform-data:
+    driver: local
+  platform-reports:
+    driver: local

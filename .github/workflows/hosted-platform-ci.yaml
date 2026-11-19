@@ -1,0 +1,77 @@
+name: ChaosLab Hosted Platform CI/CD
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+      - 'codex/**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate-and-test:
+    name: Run Automated Test Suites
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml requests
+
+      - name: Validate Local CLI Experiment Discovery
+        run: |
+          python chaoslab/runner.py list
+
+      - name: Run Backend & Authentication Tests
+        run: |
+          python tests/test_saas_backend.py
+
+      - name: Run Agent & Execution Tests
+        run: |
+          python tests/test_agent_execution.py
+
+      - name: Run Results & Multi-Tenancy Tests
+        run: |
+          python tests/test_results_and_multitenancy.py
+
+      - name: Run Complete End-to-End Platform Validation
+        run: |
+          python tests/test_e2e_platform.py
+
+  docker-build:
+    name: Validate Container Image Builds
+    needs: validate-and-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Platform Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.platform
+          push: false
+          tags: chaoslab/platform:test
+
+      - name: Build Agent Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.agent
+          push: false
+          tags: chaoslab/agent:test
