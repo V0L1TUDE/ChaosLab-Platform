@@ -212,12 +212,65 @@ class SaaSPlatformRequestHandler(BaseHTTPRequestHandler):
                 self._send_error("Unauthorized", 401)
                 return
             run_id = rep_match.group(1)
+            run = self.db.get_experiment_run(user["id"], run_id)
+            if not run:
+                self._send_error("Unauthorized or experiment not found", 404)
+                return
             report = self.db.get_report_by_run_id(run_id)
             if not report:
                 self._send_error("Report not found", 404)
                 return
             self._send_json({"report": report})
             return
+
+        # Direct Report File Download: /api/v1/reports/{run_id}/download?format=json|html|md
+        download_match = re.match(r"^/api/v1/reports/([a-zA-Z0-9-]+)/download$", path)
+        if download_match:
+            user = self._authenticate()
+            if not user:
+                self._send_error("Unauthorized", 401)
+                return
+            run_id = download_match.group(1)
+            run = self.db.get_experiment_run(user["id"], run_id)
+            if not run:
+                self._send_error("Unauthorized or experiment run not found", 404)
+                return
+
+            report = self.db.get_report_by_run_id(run_id)
+            if not report:
+                self._send_error("Report not found", 404)
+                return
+
+            fmt = query.get("format", ["json"])[0].lower()
+            self.db.log_audit(user["id"], "REPORT_DOWNLOAD", "report", report["id"], {"format": fmt})
+
+            if fmt == "html":
+                html_path = os.path.join(REPORTS_DIR, f"{run['experiment_name'].replace('-', '_')}_report.html")
+                if not os.path.exists(html_path):
+                    html_path = os.path.join(REPORTS_DIR, "payment_service_pod_kill_report.html")
+                if os.path.exists(html_path):
+                    self._set_headers(200, "text/html; charset=utf-8")
+                    with open(html_path, "rb") as f:
+                        self.wfile.write(f.read())
+                    return
+                else:
+                    self._send_error("HTML report artifact not found", 404)
+                    return
+            elif fmt == "md":
+                md_path = os.path.join(REPORTS_DIR, f"{run['experiment_name'].replace('-', '_')}_report.md")
+                if not os.path.exists(md_path):
+                    md_path = os.path.join(REPORTS_DIR, "payment_service_pod_kill_report.md")
+                if os.path.exists(md_path):
+                    self._set_headers(200, "text/markdown; charset=utf-8")
+                    with open(md_path, "rb") as f:
+                        self.wfile.write(f.read())
+                    return
+                else:
+                    self._send_error("Markdown report artifact not found", 404)
+                    return
+            else:
+                self._send_json(report["evidence_json"] if report.get("evidence_json") else report)
+                return
 
         # Audit Logs
         if path == "/api/v1/audit":
@@ -321,6 +374,9 @@ class SaaSPlatformRequestHandler(BaseHTTPRequestHandler):
             if not user:
                 self._send_error("Unauthorized", 401)
                 return
+            if user.get("role") == "viewer":
+                self._send_error("Forbidden: Viewer role cannot create applications.", 403)
+                return
             name = body.get("name", "").strip()
             if not name:
                 self._send_error("Application name is required.")
@@ -342,6 +398,9 @@ class SaaSPlatformRequestHandler(BaseHTTPRequestHandler):
             user = self._authenticate()
             if not user:
                 self._send_error("Unauthorized", 401)
+                return
+            if user.get("role") == "viewer":
+                self._send_error("Forbidden: Viewer role cannot create clusters.", 403)
                 return
             name = body.get("name", "").strip()
             if not name:
@@ -379,6 +438,9 @@ class SaaSPlatformRequestHandler(BaseHTTPRequestHandler):
             user = self._authenticate()
             if not user:
                 self._send_error("Unauthorized", 401)
+                return
+            if user.get("role") == "viewer":
+                self._send_error("Forbidden: Viewer role cannot launch chaos experiments.", 403)
                 return
             app_id = body.get("application_id")
             cluster_id = body.get("cluster_id")
