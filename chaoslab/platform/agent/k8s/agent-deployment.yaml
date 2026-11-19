@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaoslab-agent
+  namespace: chaoslab-system
+  labels:
+    app.kubernetes.io/name: chaoslab-agent
+    app.kubernetes.io/part-of: chaoslab-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chaoslab-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: chaoslab-agent
+    spec:
+      serviceAccountName: chaoslab-agent
+      containers:
+        - name: agent
+          image: chaoslab/agent:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CHAOSLAB_SERVER_URL
+              value: "http://chaoslab-platform.chaoslab-system.svc.cluster.local:8000"
+            - name: CHAOSLAB_ENROLLMENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: chaoslab-agent-secret
+                  key: enrollment-token
+                  optional: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

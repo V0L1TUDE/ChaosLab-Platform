@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaoslab-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaoslab-agent
+  namespace: chaoslab-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaoslab-agent-role
+rules:
+  # Read access for cluster status and recovery verification
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints", "events", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+
+  # Explicit least-privilege fault injection permissions for Chaos Mesh CRDs
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["podchaos", "networkchaos"]
+    verbs: ["get", "list", "watch", "create", "delete", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: chaoslab-agent-binding
+subjects:
+  - kind: ServiceAccount
+    name: chaoslab-agent
+    namespace: chaoslab-system
+roleRef:
+  kind: ClusterRole
+  name: chaoslab-agent-role
+  apiGroup: rbac.authorization.k8s.io
