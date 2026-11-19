@@ -379,6 +379,8 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
     replacement_ready_us = None
     recovery_time = None
     total_recovery_time = None
+    recovery_measured = False
+    chaos_mesh_evidence = None
 
     if not is_network_fault:
         print()
@@ -419,21 +421,35 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
 
                         recovery_time = replacement_ready_time - recovery_start
                         total_recovery_time = replacement_ready_time - fault_injected_time
+                        recovery_measured = True
                         break
 
                     time.sleep(1)
                 break
             time.sleep(1)
     else:
-        # Network chaos scenario: wait for injection duration, observe steady-state
+        # Network chaos: observe the service under the fault, read Chaos Mesh's own status WHILE the fault is
+        # active, then remove the fault and MEASURE how long until the expected replicas are Ready again.
+        # (No nominal values: if readiness never returns, recovery stays unmeasured and the Oracle says so.)
         emit_progress("waiting_impact", 50, f"Network chaos active. Observing service under latency/loss...")
         time.sleep(5)
-        replacement_pod = baseline_pod
-        replacement_ready = True
-        recovery_time = 0.5
-        total_recovery_time = 5.0
-        replacement_ready_dt = datetime.now(timezone.utc)
-        replacement_ready_us = int(time.time() * 1_000_000)
+        chaos_mesh_evidence = get_chaos_mesh_evidence(chaos_name, namespace, crd_type)
+        cleanup_chaos(chaos_name, namespace, crd_type)
+        fault_removed_time = time.time()
+        emit_progress("waiting_recovery", 60, f"Network fault removed. Waiting for {expected_replicas} Ready replica(s) (timeout: {timeout}s)...")
+        while time.time() - fault_removed_time < timeout:
+            ready_pods = get_ready_pods(namespace, label_selector)
+            if len(ready_pods) >= expected_replicas:
+                now = time.time()
+                replacement_pod = ready_pods[0]
+                replacement_ready = True
+                replacement_ready_dt = datetime.now(timezone.utc)
+                replacement_ready_us = int(now * 1_000_000)
+                recovery_time = now - fault_removed_time
+                total_recovery_time = now - fault_injected_time
+                recovery_measured = True
+                break
+            time.sleep(1)
 
     # Allow cluster state to synchronize
     time.sleep(2)
@@ -443,7 +459,8 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
     if replacement_pod:
         tracked_names.add(replacement_pod["name"])
 
-    chaos_mesh_evidence = get_chaos_mesh_evidence(chaos_name, namespace, crd_type)
+    if chaos_mesh_evidence is None:                 # network faults read it while the fault was still active
+        chaos_mesh_evidence = get_chaos_mesh_evidence(chaos_name, namespace, crd_type)
     k8s_events = get_kubernetes_events(namespace, tracked_names, target_name)
     current_ready_pods = get_ready_pods(namespace, label_selector)
 
@@ -545,6 +562,9 @@ def run_experiment(config: Dict[str, Any], progress_callback: Optional[Callable]
         "recovered_ready_replicas": len(current_ready_pods),
         "recovery_time_seconds": round(recovery_time, 2) if recovery_time is not None else None,
         "total_recovery_seconds": round(total_recovery_time, 2) if total_recovery_time is not None else None,
+        "recovery_measured": recovery_measured,
+        "recovery_metric": ("seconds from fault removal until the expected replicas were Ready" if is_network_fault
+                            else "seconds from the original pod's disappearance until the expected replicas were Ready"),
         "application": app_evidence,
         "telemetry": telemetry_evidence,
         "chaos_mesh_evidence": chaos_mesh_evidence,

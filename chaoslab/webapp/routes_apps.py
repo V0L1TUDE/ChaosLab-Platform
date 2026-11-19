@@ -1,0 +1,325 @@
+"""Applications API: list, upload, detail, delete. Every query is scoped to the caller."""
+
+import json
+from typing import Any, Dict, Optional
+
+from . import catalog, config, db, deployments, manifests, probe_spec, telemetry_spec, uploads
+from .http_core import HttpError, json_response, router
+
+
+def is_shared_id(app_id: int) -> bool:
+    """True when the operator listed this application id as a shared Live demo."""
+    return app_id in config.SHARED_APP_IDS
+
+
+def shared_ids_param() -> str:
+    """The shared ids as ',7,8,' for the SQL `instr` test below ('' when the feature is off)."""
+    return "," + ",".join(str(i) for i in config.SHARED_APP_IDS) + "," if config.SHARED_APP_IDS else ""
+
+
+def is_shared_guest(row, user_id: int) -> bool:
+    """True when `user_id` sees this app only because it is a shared demo (they do not own it)."""
+    return is_shared_id(row["id"]) and row["user_id"] is not None and row["user_id"] != user_id
+
+
+def require_owner(row, user_id: int) -> None:
+    if is_shared_guest(row, user_id):
+        raise HttpError(403, "The shared demo application is managed by the site operator.")
+
+
+# Apps a user can see: their own, the built-in demos (if enabled), and the operator's shared demos (cluster apps only).
+_SHARED_SQL = "instr(?, ',' || a.id || ',') > 0"
+VISIBLE_APPS_WHERE = f"(a.user_id = ? OR (a.user_id IS NULL AND ?) OR ({_SHARED_SQL} AND a.cluster_id IS NOT NULL))"
+
+
+def visible_apps(conn, uid: int):
+    return conn.execute(
+        "SELECT a.*, (SELECT COUNT(*) FROM experiments e WHERE e.application_id = a.id AND e.user_id = ?) AS n "
+        f"FROM applications a WHERE {VISIBLE_APPS_WHERE} "
+        f"ORDER BY (a.user_id IS NULL) DESC, ({_SHARED_SQL}) DESC, CASE WHEN a.user_id IS NULL THEN a.id END ASC, a.id DESC",
+        (uid, uid, int(config.SHOW_DEMO_APPS), shared_ids_param(), shared_ids_param()),
+    ).fetchall()
+
+
+def app_to_dict(row, experiments_count: int = 0, user_id: Optional[int] = None) -> Dict[str, Any]:
+    builtin = row["user_id"] is None
+    guest = user_id is not None and is_shared_guest(row, user_id)
+    d = {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"],
+        "upload_type": row["upload_type"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "is_builtin": builtin,
+        "original_filename": row["original_filename"],
+        "file_size": row["file_size"],
+        "executable": builtin or row["status"] in ("validated", "deployed") or bool(row["cluster_id"]),   # can run experiments
+        "deployable": (not builtin) and row["status"] in ("validated", "deploy_failed"),
+        "experiments_count": experiments_count,
+        "is_shared": is_shared_id(row["id"]) and bool(row["cluster_id"]),
+        "can_manage": (not builtin) and not guest,
+    }
+    if guest:
+        d["deployable"] = False
+    d["slug"] = row["slug"]
+    d["cluster_id"] = row["cluster_id"]
+    if row["cluster_id"]:
+        d["namespace"] = row["namespace"]
+        with db.session() as c2:
+            cl = c2.execute("SELECT name, status FROM clusters WHERE id = ?", (row["cluster_id"],)).fetchone()
+        d["cluster_name"] = cl["name"] if cl else None
+        d["executable"] = bool(cl and cl["status"] != "revoked")
+    if not builtin and row["validation_json"]:
+        v = json.loads(row["validation_json"])
+        d["validation"] = {"valid": v["valid"], "errors": v["errors"], "warnings": v["warnings"]}
+        d["namespace"] = row["namespace"]
+    if builtin:
+        app = catalog.get_builtin(row["slug"])
+        d["services_count"] = len(catalog.discover_services(app)["services"]) if app else 0
+    return d
+
+
+def get_accessible_app(conn, user_id: int, app_id: int):
+    """Own apps, built-in apps and the shared demo. Other users' apps look like 404 (no existence leak)."""
+    row = conn.execute(
+        f"SELECT a.* FROM applications a WHERE a.id = ? AND {VISIBLE_APPS_WHERE}",
+        (app_id, user_id, int(config.SHOW_DEMO_APPS), shared_ids_param())
+    ).fetchone()
+    if not row:
+        raise HttpError(404, "Application not found.")
+    return row
+
+
+def _app_id(req) -> int:
+    try:
+        return int(req.params["id"])
+    except ValueError:
+        raise HttpError(404, "Application not found.")
+
+
+@router.route("GET", "/api/applications")
+def list_applications(req):
+    uid = req.user["id"]
+    with db.session() as conn:
+        rows = visible_apps(conn, uid)
+    return json_response({"applications": [app_to_dict(r, r["n"], uid) for r in rows]})
+
+
+@router.route("POST", "/api/applications")
+def upload_application(req):
+    fields, files = req.multipart()
+    name = (fields.get("name") or "").strip()
+    description = (fields.get("description") or "").strip()
+    if not 1 <= len(name) <= 80:
+        raise HttpError(400, "Application name is required (max 80 characters).")
+    if len(description) > 500:
+        raise HttpError(400, "Description must be at most 500 characters.")
+    f = files.get("file")
+    if not f or not f["filename"]:
+        raise HttpError(400, "An application file is required.")
+
+    # 1. Validate first: bounded content/archive inspection, nothing is stored yet.
+    try:
+        ext = uploads.inspect(f["filename"], f["data"])
+    except uploads.UploadError as e:
+        raise HttpError(e.status, str(e))
+
+    # 2. Kubernetes manifest uploads (.yaml/.yml/.zip with yaml) are validated in memory against the strict sandbox
+    #    BEFORE anything is stored. Only the sanitized resources (manifest_json) are ever deployed, never the raw bytes.
+    upload_type = ext.lstrip(".")
+    status, manifest_json, validation_json = "registered", None, None
+    if manifests.has_manifest_candidates(upload_type, f["data"]):
+        result = manifests.analyze(upload_type, f["data"])
+        status = "validated" if result["valid"] else "invalid"
+        manifest_json = json.dumps({"resources": result["resources"]}) if result["valid"] else None
+        validation_json = json.dumps({k: result[k] for k in ("valid", "errors", "warnings", "workloads")})
+
+    # 3. Store the original bytes (kept for reference / download; invalid uploads can never be deployed).
+    try:
+        meta = uploads.store(req.user["id"], f["filename"], f["data"], ext)
+    except uploads.UploadError as e:
+        raise HttpError(e.status, str(e))
+
+    try:
+        with db.session() as conn:
+            cur = conn.execute(
+                "INSERT INTO applications (user_id, name, description, file_path, storage_backend, original_filename, "
+                "file_size, upload_type, status, manifest_json, validation_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (req.user["id"], name, description, meta["file_path"], meta["storage_backend"], meta["original_filename"],
+                 meta["file_size"], meta["upload_type"], status, manifest_json, validation_json, db.utcnow()),
+            )
+            row = conn.execute("SELECT * FROM applications WHERE id = ?", (cur.lastrowid,)).fetchone()
+    except Exception:
+        try:   # don't orphan the stored object if the DB insert fails
+            uploads.delete_stored_file(meta["file_path"], meta["storage_backend"])
+        except uploads.UploadError:
+            pass
+        raise
+    return json_response({"application": app_to_dict(row)}, 201)
+
+
+@router.route("GET", "/api/applications/<id>")
+def application_detail(req):
+    uid = req.user["id"]
+    with db.session() as conn:
+        row = get_accessible_app(conn, uid, _app_id(req))
+        exps = conn.execute(
+            "SELECT id, target_service, fault_type, mode, status, oracle_verdict, created_at, completed_at "
+            "FROM experiments WHERE application_id = ? AND user_id = ? ORDER BY id DESC LIMIT 50",
+            (row["id"], uid),
+        ).fetchall()
+    data = app_to_dict(row, len(exps), uid)
+    data["experiments"] = [dict(e) for e in exps]
+    if row["user_id"] is None:
+        data["catalog"] = catalog.describe_app(catalog.get_builtin(row["slug"]), force=req.qs("refresh") == "1")
+    else:
+        resolved = catalog.resolve_app(row)
+        if row["cluster_id"]:
+            guest = is_shared_guest(row, uid)
+            data["note"] = (
+                ("Shared Live demo: this application runs on a real Kubernetes cluster operated by this ChaosLab site. "
+                 "Your experiments inject real faults there and are verified by the Oracle; they and their reports are "
+                 f"visible only to you. Fair use: one experiment at a time on the cluster, up to "
+                 f"{config.SHARED_LIVE_RUNS_PER_HOUR} Live runs per hour, faults up to {config.SHARED_MAX_DURATION_SECONDS}s.")
+                if guest else
+                ("This application runs in your own cluster. Experiments are executed by the ChaosLab agent "
+                 "inside that cluster; nothing is deployed or changed by this server."))
+            if resolved:
+                data["probes"] = resolved["probes"]
+                data["telemetry"] = resolved["telemetry"]
+                data["catalog"] = catalog.describe_app(resolved)
+                data["cluster"] = {"id": None if guest else resolved["cluster_id"], "name": resolved["cluster_name"],
+                                   "online": resolved["cluster_online"], "paused": resolved["cluster_paused"],
+                                   "telemetry_source": resolved["telemetry_source"]}
+            else:
+                data["note"] = "The cluster for this application was removed. Past experiments and reports are kept."
+        elif resolved:
+            data["catalog"] = catalog.describe_app(resolved, force=req.qs("refresh") == "1")
+            data["deployment"] = deployments.deployment_info(row)
+        elif row["status"] == "invalid":
+            data["deployment"] = deployments.deployment_info(row)
+            data["note"] = "This upload is not a valid Kubernetes manifest bundle for the sandbox. See the errors below, fix them and upload again."
+        else:
+            data["note"] = ("This file is registered and stored only. To run experiments on your own application, upload "
+                            "Kubernetes manifests (.yaml, or a .zip containing .yaml files).")
+    return json_response({"application": data})
+
+
+@router.route("DELETE", "/api/applications/<id>")
+def delete_application(req):
+    uid = req.user["id"]
+    with db.session() as conn:
+        row = get_accessible_app(conn, uid, _app_id(req))
+        if row["user_id"] is None:
+            raise HttpError(403, "The built-in demo application cannot be deleted.")
+        require_owner(row, uid)
+        if is_shared_id(row["id"]):
+            # Deleting would cascade to every other user's experiments and reports on the shared demo.
+            raise HttpError(409, "This application is the shared Live demo. Remove its id from CHAOSLAB_SHARED_APP_ID on the server first.")
+        if row["status"] == "deploying":
+            raise HttpError(409, "Deployment is still in progress. Try again in a moment.")
+        # Only sandbox deployments own a cl-app-<id> namespace. A connected-cluster app's `namespace` is the
+        # customer's own namespace: it is never touched (and the server's kubectl is never involved).
+        if not row["cluster_id"] and (row["status"] in ("deployed", "deploy_failed") or row["namespace"]):
+            try:                                  # never leave a sandbox namespace running without an owner
+                deployments.undeploy(row["id"], uid)
+            except deployments.DeployRejected as e:
+                raise HttpError(e.status, str(e))
+        ref, backend = row["file_path"], row["storage_backend"]
+        # Remove the stored object first: if the backend fails the record is kept so the delete can be retried.
+        try:
+            uploads.delete_stored_file(ref, backend)
+        except uploads.UploadError as e:
+            raise HttpError(e.status, str(e))
+        conn.execute("DELETE FROM applications WHERE id = ? AND user_id = ?", (row["id"], uid))
+    return json_response({"ok": True})
+
+
+@router.route("POST", "/api/applications/<id>/deploy")
+def deploy_application(req):
+    with db.session() as conn:
+        row = get_accessible_app(conn, req.user["id"], _app_id(req))
+    require_owner(row, req.user["id"])
+    try:
+        deployments.start_deploy(row["id"], req.user["id"])
+    except deployments.DeployRejected as e:
+        raise HttpError(e.status, str(e))
+    with db.session() as conn:
+        row = conn.execute("SELECT * FROM applications WHERE id = ?", (row["id"],)).fetchone()
+    return json_response({"deployment": deployments.deployment_info(row)}, 202)
+
+
+@router.route("POST", "/api/applications/<id>/undeploy")
+def undeploy_application(req):
+    with db.session() as conn:
+        row = get_accessible_app(conn, req.user["id"], _app_id(req))
+    if row["user_id"] is None:
+        raise HttpError(403, "Built-in applications are managed by the platform.")
+    require_owner(row, req.user["id"])
+    try:
+        deployments.undeploy(row["id"], req.user["id"])
+    except deployments.DeployRejected as e:
+        raise HttpError(e.status, str(e))
+    with db.session() as conn:
+        row = conn.execute("SELECT * FROM applications WHERE id = ?", (row["id"],)).fetchone()
+    return json_response({"deployment": deployments.deployment_info(row)})
+
+
+@router.route("POST", "/api/applications/<id>/probes")
+def set_probes(req):
+    """Set (or clear, with probes=null) the declarative verification probes for one service of a cluster app."""
+    body = req.json()
+    service = body.get("service")
+    with db.session() as conn:
+        row = conn.execute("SELECT * FROM applications WHERE id = ? AND user_id = ?", (_app_id(req), req.user["id"])).fetchone()
+        if not row:
+            raise HttpError(404, "Application not found.")
+        if not row["cluster_id"]:
+            raise HttpError(409, "Verification probes are available for applications in a connected cluster.")
+        resolved = catalog.resolve_app(row)
+        if not resolved:
+            raise HttpError(409, "The cluster for this application was removed.")
+        names = catalog.targetable_services(resolved)
+        if not isinstance(service, str) or service not in names:
+            raise HttpError(400, f"Unknown service. Choose one of: {', '.join(names) or '(none reported yet)'}.")
+        probes = json.loads(row["probe_json"]) if row["probe_json"] else {}
+        if body.get("probes") is None:
+            probes.pop(service, None)
+        else:
+            clean, err = probe_spec.validate(body["probes"])
+            if err:
+                raise HttpError(400, err)
+            probes[service] = clean
+        conn.execute("UPDATE applications SET probe_json = ? WHERE id = ?", (json.dumps(probes) if probes else None, row["id"]))
+    return json_response({"probes": probes})
+
+
+@router.route("POST", "/api/applications/<id>/telemetry")
+def set_telemetry(req):
+    """Set (or clear, with telemetry=null) the tracing checks for one service of a connected-cluster app."""
+    body = req.json()
+    service = body.get("service")
+    with db.session() as conn:
+        row = conn.execute("SELECT * FROM applications WHERE id = ? AND user_id = ?", (_app_id(req), req.user["id"])).fetchone()
+        if not row:
+            raise HttpError(404, "Application not found.")
+        if not row["cluster_id"]:
+            raise HttpError(409, "Tracing checks are available for applications in a connected cluster.")
+        resolved = catalog.resolve_app(row)
+        if not resolved:
+            raise HttpError(409, "The cluster for this application was removed.")
+        names = catalog.targetable_services(resolved)
+        if not isinstance(service, str) or service not in names:
+            raise HttpError(400, f"Unknown service. Choose one of: {', '.join(names) or '(none reported yet)'}.")
+        current = json.loads(row["telemetry_json"]) if row["telemetry_json"] else {}
+        if body.get("telemetry") is None:
+            current.pop(service, None)
+        else:
+            clean, err = telemetry_spec.validate(body["telemetry"], service, names)
+            if err:
+                raise HttpError(400, err)
+            current[service] = clean
+        conn.execute("UPDATE applications SET telemetry_json = ? WHERE id = ?", (json.dumps(current) if current else None, row["id"]))
+    return json_response({"telemetry": current})
