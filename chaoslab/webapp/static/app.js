@@ -775,7 +775,7 @@ function enrollPanel(c, e) {
 async function pageClusters() {
   const {clusters} = await api('GET', '/api/clusters');
   render(shell('#/clusters', h`
-    <div class="page-head"><div><h1>Clusters</h1><p>Connect your own Kubernetes cluster with the ChaosLab agent. Experiments run inside your environment; this site only sends approved instructions and receives evidence.</p></div></div>
+    <div class="page-head"><div><h1>Clusters</h1><p>Connect your own Kubernetes cluster with the ChaosLab agent. Experiments run inside your environment.</p></div></div>
     <div class="grid" style="grid-template-columns:3fr 2fr;align-items:start">
       <div class="card"><div class="card-title"><h2>Your clusters</h2></div>
         ${clusters.length ? h`<div class="table-wrap"><table><thead><tr><th>Name</th><th>State</th><th>Namespaces</th><th>Apps</th><th>Last seen</th></tr></thead><tbody>
