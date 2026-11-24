@@ -90,10 +90,7 @@ def register_user(name: Any, email: Any, password: Any) -> Dict[str, Any]:
         raise AuthError("Name must be between 1 and 80 characters.")
     if not _EMAIL_RE.match(email):
         raise AuthError("Please provide a valid email address.")
-    if len(password) < config.MIN_PASSWORD_LENGTH:
-        raise AuthError(f"Password must be at least {config.MIN_PASSWORD_LENGTH} characters.")
-    if len(password) > 256:
-        raise AuthError("Password is too long (max 256 characters).")
+    _check_password_rules(password)
 
     with db.session() as conn:
         if conn.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
@@ -104,6 +101,14 @@ def register_user(name: Any, email: Any, password: Any) -> Dict[str, Any]:
         )
         row = conn.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone()
     return public_user(row)
+
+
+def _check_password_rules(password: str) -> None:
+    """Shared by registration and password change so both enforce the same policy."""
+    if len(password) < config.MIN_PASSWORD_LENGTH:
+        raise AuthError(f"Password must be at least {config.MIN_PASSWORD_LENGTH} characters.")
+    if len(password) > 256:
+        raise AuthError("Password is too long (max 256 characters).")
 
 
 def create_session(user_id: int) -> str:
@@ -156,3 +161,39 @@ def logout(token: Optional[str]) -> None:
     if token:
         with db.session() as conn:
             conn.execute("DELETE FROM sessions WHERE token_hash = ?", (_hash_token(token),))
+
+
+# --- account security: password change and sign-out everywhere ------------------------------
+def change_password(user_id: int, current_password: Any, new_password: Any, keep_token: Optional[str] = None) -> int:
+    """Verify the current password, store a new hash and revoke every other session of this user.
+
+    The session identified by `keep_token` (the one making the request) stays signed in, so the
+    user is not logged out of the tab they are using. Returns how many other sessions were revoked.
+    Wrong current passwords count towards the same throttle as logins (keyed per user).
+    """
+    if not isinstance(current_password, str) or not isinstance(new_password, str):
+        raise AuthError("current_password and new_password are required strings.")
+    _check_password_rules(new_password)
+    if hmac.compare_digest(current_password.encode("utf-8"), new_password.encode("utf-8")):
+        raise AuthError("New password must be different from the current password.")
+
+    key = f"change-password:{user_id}"
+    if _throttled(key):
+        raise AuthError("Too many failed attempts. Try again in a few minutes.", 429)
+    with db.session() as conn:
+        row = conn.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row or not verify_password(current_password, row["password_hash"]):
+            _record_failure(key)
+            raise AuthError("Current password is incorrect.", 403)
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(new_password), user_id))
+        keep_hash = _hash_token(keep_token) if keep_token else ""
+        cur = conn.execute("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?", (user_id, keep_hash))
+        revoked = cur.rowcount
+    _clear_failures(key)
+    return revoked
+
+
+def logout_all(user_id: int) -> int:
+    """Revoke every session of this user (all browsers and devices). Returns the number revoked."""
+    with db.session() as conn:
+        return conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,)).rowcount
