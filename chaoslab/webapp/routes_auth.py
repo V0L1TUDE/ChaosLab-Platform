@@ -1,4 +1,4 @@
-"""Authentication API: register, login, logout, current user."""
+"""Authentication API: register, login, logout, current user, password change, sign out everywhere."""
 
 from . import auth, config
 from .http_core import json_response, router, session_cookie_header
@@ -28,3 +28,17 @@ def logout(req):
 @router.route("GET", "/api/auth/me", auth_required=False)
 def me(req):
     return json_response({"user": req.user})
+
+
+@router.route("POST", "/api/auth/change-password")
+def change_password(req):
+    body = req.json()
+    revoked = auth.change_password(req.user["id"], body.get("current_password"), body.get("new_password"),
+                                   keep_token=req.token)
+    return json_response({"ok": True, "other_sessions_revoked": revoked})
+
+
+@router.route("POST", "/api/auth/logout-all")
+def logout_all(req):
+    revoked = auth.logout_all(req.user["id"])
+    return json_response({"ok": True, "sessions_revoked": revoked}, 200, [session_cookie_header("", 0)])
