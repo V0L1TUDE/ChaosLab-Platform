@@ -216,6 +216,8 @@ All endpoints are JSON; authentication is the `chaoslab_session` HttpOnly cookie
 | `POST /api/auth/register` `{name,email,password}` | Create account and session (201) |
 | `POST /api/auth/login` `{email,password}` | Sign in (generic error, throttled) |
 | `POST /api/auth/logout` · `GET /api/auth/me` | Sign out · current user (or `null`) |
+| `POST /api/auth/change-password` `{current_password,new_password}` | Change password; signs out every other session, keeps this one (wrong current password: `403`, throttled) |
+| `POST /api/auth/logout-all` | Sign out of every browser/device for this account |
 | `GET /api/dashboard` | Totals, application list, recent experiments |
 | `GET /api/applications` · `POST /api/applications` (multipart `name`, `description`, `file`) | List own + built-in · upload |
 | `GET /api/applications/{id}` · `DELETE /api/applications/{id}` | Detail (+ catalog & history) · delete own upload |
