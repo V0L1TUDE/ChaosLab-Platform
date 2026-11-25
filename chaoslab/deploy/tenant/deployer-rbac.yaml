@@ -1,0 +1,89 @@
+# ChaosLab tenant deployer: the ONLY identity the web app uses on the tenant cluster.
+#
+# Least privilege: no Secrets, no RBAC, no pods/exec, no node or admission-policy changes. The ClusterRole is bound
+# cluster-wide because ChaosLab creates a fresh namespace per application, but the `chaoslab-deployer-scope`
+# ValidatingAdmissionPolicy (admission-policies.yaml) confines every write to namespaces named cl-app-<id> that carry
+# ChaosLab's managed-by label and Pod Security `restricted`. The web app's preflight refuses to deploy if these
+# credentials can do more than this (for example if they are cluster-admin).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaoslab-system
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaoslab-deployer
+  namespace: chaoslab-system
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaoslab-deployer
+rules:
+  # per-application namespaces (create / label / delete; the scope policy restricts names and labels)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  # what a sandbox namespace contains: the platform's guard rails and the user's sanitized resources
+  - apiGroups: [""]
+    resources: ["configmaps", "services", "resourcequotas", "limitranges"]
+    verbs: ["get", "list", "create", "patch", "update", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "patch", "update", "delete"]
+  # readiness, diagnostics and Live experiments (read only)
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list"]
+  # Live experiments on deployed sandbox apps (Chaos Mesh objects only inside cl-app-* namespaces)
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["podchaos", "networkchaos"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  # preflight: confirm the sandbox runtime, tenant nodes and admission policies (read only)
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingadmissionpolicies", "validatingadmissionpolicybindings"]
+    verbs: ["get"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    resourceNames: ["podchaos.chaos-mesh.org", "networkchaos.chaos-mesh.org"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: chaoslab-deployer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: chaoslab-deployer
+subjects:
+  - kind: ServiceAccount
+    name: chaoslab-deployer
+    namespace: chaoslab-system
+---
+# Long-lived token for the web server's kubeconfig (rotate by deleting and re-creating this Secret).
+# Alternatively mint short-lived tokens: kubectl create token chaoslab-deployer -n chaoslab-system --duration=24h
+apiVersion: v1
+kind: Secret
+metadata:
+  name: chaoslab-deployer-token
+  namespace: chaoslab-system
+  annotations:
+    kubernetes.io/service-account.name: chaoslab-deployer
+type: kubernetes.io/service-account-token

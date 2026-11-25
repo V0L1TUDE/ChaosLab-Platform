@@ -1,0 +1,66 @@
+# Run the agent inside the cluster (after agent-rbac.yaml). Create the one-time token Secret first:
+#   kubectl -n chaoslab-agent create secret generic chaoslab-agent-token --from-literal=token=cle_XXXX
+# The token is only used on first start; afterwards the agent uses the credential saved on the /state volume.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chaoslab-agent-state
+  namespace: chaoslab-agent
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 16Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaoslab-agent
+  namespace: chaoslab-agent
+spec:
+  replicas: 1                      # exactly one agent per cluster
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: chaoslab-agent
+  template:
+    metadata:
+      labels:
+        app: chaoslab-agent
+    spec:
+      serviceAccountName: chaoslab-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: chaoslab-agent:1.0.0            # build/push from chaoslab/agent/Dockerfile
+          env:
+            - name: CHAOSLAB_SERVER
+              value: "https://chaoslab.example.com"       # your ChaosLab URL (https)
+            - name: CHAOSLAB_ALLOWED_NAMESPACES
+              value: "shop,payments"                       # must match the RoleBindings you created
+            - name: CHAOSLAB_ENROLL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: chaoslab-agent-token
+                  key: token
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          volumeMounts:
+            - name: state
+              mountPath: /state
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: chaoslab-agent-state
