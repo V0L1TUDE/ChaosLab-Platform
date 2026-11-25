@@ -520,7 +520,7 @@ async function pageNewExperiment(appParam) {
       <div class="grid" style="grid-template-columns:2fr 1fr;align-items:start">
       <form data-form="experiment" id="exp-form">
         <div class="card"><h3><span class="step-n">1</span>Application</h3>
-          <div class="choices" style="margin-top:10px">${builtins.map(a => choice('app', a.id, a.name, a.is_builtin ? `${a.services_count} services · preconfigured` : (a.is_shared && !a.can_manage) ? `shared Live demo · ${a.cluster_name}` : a.cluster_id ? `your cluster · ${a.cluster_name}` : `your upload · ${a.status}`, a.id === current.id, false))}</div></div>
+          <div class="choices" style="margin-top:10px">${builtins.map(a => choice('app', a.id, a.name, a.is_builtin ? `${a.services_count} services · preconfigured` : a.is_shared ? '' : a.cluster_id ? `your cluster · ${a.cluster_name}` : `your upload · ${a.status}`, a.id === current.id, false))}</div></div>
         <div class="card"><h3><span class="step-n">2</span>Target microservice</h3>
           ${discoveryNote(cat.discovery)}
           ${cat.targetable_services.length ? '' : h`<div class="banner err" style="margin:10px 0 0"><div><b>No services found in namespace <code>${cat.namespace}</code>.</b> Check the namespace name for typos (<code>kubectl get deployments -n ${cat.namespace}</code>). For a connected cluster, the agent's <code>--allowed-namespaces</code> must match it exactly, and Deployments need an <code>app</code> label.</div></div>`}

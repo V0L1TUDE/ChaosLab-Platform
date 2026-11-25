@@ -52,7 +52,7 @@ def live_capability(force: bool = False) -> Dict[str, Any]:
     if not force and _capability_cache["value"] and now - _capability_cache["at"] < 15:
         return _capability_cache["value"]
     if not config.LIVE_ENABLED:
-        value = {"available": False, "reason": "Live execution is disabled on this server (CHAOSLAB_LIVE_ENABLED=false)."}
+        value = {"available": False, "reason": "Live execution is not available for this application on this server."}
     elif not shutil.which("kubectl"):
         value = {"available": False, "reason": "kubectl was not found on the server."}
     else:
